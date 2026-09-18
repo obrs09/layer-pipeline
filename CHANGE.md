@@ -2,12 +2,19 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — 布局测试改回本机真实图
+
+- 做了：`tests/test_imagine_layout.py` 再读本机 `test_input/`（Imagine `segments/` 与扁图目录）；图仍 gitignore，不进 GitHub。没有本机目录时 skip，避免别人 clone 后 pytest 红
+- 怎么跑：`python -m pytest tests/test_imagine_layout.py`
+- 产物路径：本机 `test_input/`（不进 git）
+- 未做 / 已知缺陷：首个 commit 的 git 历史里仍有这些图；要从 GitHub 历史里彻底抹掉需要 rewrite + force push
+
 ## 2026-09-18 — 测试图不进 git
 
-- 做了：`test_input/` 加入 gitignore 并从 git 跟踪中移除（本机文件保留）；布局测试改为临时目录，不再读真实测试图
+- 做了：`test_input/` 加入 gitignore 并从 git 跟踪中移除（本机文件保留）
 - 怎么跑：`python -m pytest`
 - 产物路径：https://github.com/obrs09/layer-pipeline
-- 未做 / 已知缺陷：首个 commit 的 git 历史里仍有这些图；要从 GitHub 历史里彻底抹掉需要 rewrite + force push
+- 未做 / 已知缺陷：首个 commit 的 git 历史里仍有这些图；要从 GitHub 历史里彻底抹掉需要 rewrite + force push。布局测试当时误改成临时目录，下一节已改回真实图
 
 ## 2026-09-18 — git 远程 + CHANGE 落盘
 
