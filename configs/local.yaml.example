@@ -1,0 +1,8 @@
+# Copy to configs/local.yaml (gitignored) and edit.
+# Weights are expected under model/ as the user requested.
+
+paths:
+  model_root: model
+  sam2_checkpoint: model/sam2/sam2.1_hiera_large.pt
+  lama_checkpoint: model/lama/big-lama.pt
+  sd15_model: model/sd15

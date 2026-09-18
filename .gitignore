@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# outputs and local overrides
+runs/
+configs/local.yaml
+
+# weights (keep folder via model/.gitkeep)
+model/**
+!model/.gitkeep
+
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx

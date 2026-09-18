@@ -1,0 +1,39 @@
+schema: layerforge.config.v1
+
+normalize:
+  max_side: 2048
+
+segment:
+  name: auto
+
+inpaint:
+  name: identity
+  small_hole_backend: lama
+  small_hole_max_px: 4096
+  seam_dilate_px: 2
+
+compose:
+  name: reproject_v1
+
+paths:
+  model_root: model
+  sam2_dir: model/sam2
+  lama_dir: model/lama
+  sd15_dir: model/sd15
+
+export:
+  psd: false
+
+refine:
+  min_area: 64
+  mutex: true
+
+occlusion:
+  background_luma: 250
+
+qa:
+  diff_visible_only: true
+
+require_cuda_for:
+  - sd15.anime
+  - sam2.hinted

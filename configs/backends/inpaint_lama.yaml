@@ -1,0 +1,3 @@
+name: lama
+protocol: InpaintBackend
+checkpoint: model/lama/big-lama.pt

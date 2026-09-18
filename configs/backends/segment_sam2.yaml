@@ -1,0 +1,7 @@
+name: sam2.hinted
+protocol: SegmentBackend
+checkpoint: model/sam2/sam2.1_hiera_large.pt
+model_cfg: configs/sam2.1/sam2.1_hiera_l.yaml
+multimask: true
+pick: best_iou
+points_per_side: 24

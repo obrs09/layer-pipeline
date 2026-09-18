@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "layerforge"
+version = "0.1.0"
+description = "Anime stills or Grok Imagine parts → completed layer packs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2.0",
+  "opencv-python-headless>=4.10",
+  "pillow>=10.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+gpu = [
+  "torch",
+  "diffusers",
+  "transformers",
+  "accelerate",
+  "safetensors",
+]
+lama = ["simple-lama-inpainting"]
+psd = ["pytoshop"]
+
+[project.scripts]
+layerforge = "layerforge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

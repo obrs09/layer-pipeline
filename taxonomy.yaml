@@ -1,0 +1,141 @@
+roles:
+  bg:
+    order: 0
+    complete: false
+    overlay: false
+    expand_px: 0
+    occluded_by: []
+    aliases: [background, white-bed-sheet, bed-sheet]
+  hair_back:
+    order: 10
+    complete: true
+    overlay: false
+    expand_px: 24
+    occluded_by: [body, arm_l, arm_r, clothes, face, hair_front, acc]
+    aliases: [hair-back, long-hair-back]
+  body:
+    order: 20
+    complete: true
+    overlay: false
+    expand_px: 20
+    occluded_by: [arm_l, arm_r, clothes, face, hair_front, acc]
+    aliases:
+      - skin
+      - torso
+      - cleavage
+      - bare-shoulders
+      - bare-legs
+      - white-haired-anime-girl
+      - anime-girl
+  arm_l:
+    order: 25
+    complete: true
+    overlay: false
+    expand_px: 18
+    occluded_by: [clothes, hair_front, acc]
+    aliases: [left-arm, arm-left]
+  arm_r:
+    order: 26
+    complete: true
+    overlay: false
+    expand_px: 18
+    occluded_by: [clothes, hair_front, acc]
+    aliases: [right-arm, arm-right]
+  clothes:
+    order: 40
+    complete: true
+    overlay: false
+    expand_px: 16
+    occluded_by: [arm_l, arm_r, hair_front, acc]
+    aliases:
+      - dress
+      - gown
+      - white-and-purple-gown
+      - white-tank-top
+      - purple-cape
+      - cape
+      - shirt
+  face:
+    order: 50
+    complete: true
+    overlay: false
+    expand_px: 8
+    occluded_by: [hair_front, acc]
+    aliases: [head]
+  brow_l:
+    order: 55
+    complete: false
+    overlay: true
+    expand_px: 4
+    occluded_by: [hair_front]
+    aliases: [left-brow, eyebrow-l]
+  brow_r:
+    order: 56
+    complete: false
+    overlay: true
+    expand_px: 4
+    occluded_by: [hair_front]
+    aliases: [right-brow, eyebrow-r]
+  eye_l:
+    order: 60
+    complete: false
+    overlay: true
+    expand_px: 4
+    occluded_by: [hair_front]
+    aliases: [left-eye]
+  eye_r:
+    order: 61
+    complete: false
+    overlay: true
+    expand_px: 4
+    occluded_by: [hair_front]
+    aliases: [right-eye]
+  mouth:
+    order: 65
+    complete: false
+    overlay: true
+    expand_px: 4
+    occluded_by: []
+    aliases: [lips]
+  hair_front:
+    order: 80
+    complete: true
+    overlay: false
+    expand_px: 16
+    occluded_by: [acc]
+    aliases:
+      - bangs
+      - pink-and-purple-hair
+  acc:
+    order: 90
+    complete: false
+    overlay: true
+    expand_px: 0
+    occluded_by: []
+    aliases:
+      - accessory
+      - jewelry
+      - gold-jewelry
+      - ankle-jewelry
+      - white-high-heels
+      - purple-gemstones
+      - lion-emblems
+      - gold-embroidery
+      - gold-geometric-patterns
+      - pink-panties
+      - purple-tassel-hair-accessory
+      - gold-star-hair-ornament
+      - flower-hair-clip
+      - hair-ribbon
+
+# Labels that share a stem and should be split left/right by centroid x.
+pair_roles:
+  eye: [eye_l, eye_r]
+  brow: [brow_l, brow_r]
+  arm: [arm_l, arm_r]
+
+# Imagine captions that map to a pair family instead of a single role.
+pair_aliases:
+  pink-eyes: eye
+  multicolored-eyes: eye
+  eyes: eye

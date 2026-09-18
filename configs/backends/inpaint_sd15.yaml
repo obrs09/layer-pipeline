@@ -1,0 +1,11 @@
+name: sd15.anime
+protocol: InpaintBackend
+model: model/sd15
+prompt: >-
+  anime illustration, same character, continue existing fabric and lineart,
+  seamless, no new pattern, no extra limbs, no text
+negative_prompt: >-
+  photorealistic, extra fingers, watermark, new emblem, text, blurry
+steps: 28
+guidance: 7.0
+require_cuda: true
