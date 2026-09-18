@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — 测试图不进 git
+
+- 做了：`test_input/` 加入 gitignore 并从 git 跟踪中移除（本机文件保留）；布局测试改为临时目录，不再读真实测试图
+- 怎么跑：`python -m pytest`
+- 产物路径：https://github.com/obrs09/layer-pipeline
+- 未做 / 已知缺陷：首个 commit 的 git 历史里仍有这些图；要从 GitHub 历史里彻底抹掉需要 rewrite + force push
+
 ## 2026-09-18 — git 远程 + CHANGE 落盘
 
 - 做了：初始化 git，远程 `https://github.com/obrs09/layer-pipeline.git`；把 CHANGE 写成根目录 `CHANGE.md`；AGENTS / Builder 规则改为交付必须改这个文件

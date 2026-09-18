@@ -5,8 +5,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
-# outputs and local overrides
+# outputs, local images, and local overrides
 runs/
+test_input/
 configs/local.yaml
 
 # weights (keep folder via model/.gitkeep)

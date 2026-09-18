@@ -14,15 +14,11 @@
 
 ```text
 python -m pip install -e ".[dev]"
-python -m layerforge run --input test_input/image_partial_sag/image0 --out runs --dry-run
+python -m layerforge run --input <本机图片或 Imagine 目录> --out runs --dry-run
 python -m pytest
 ```
 
-扁图（无 `segments/`）：
-
-```text
-python -m layerforge run --input test_input/image_no_sag/<file>.jpg --out runs --segment silhouette --inpaint identity
-```
+测试图放本机 `test_input/`（不进 git）。Imagine 分块目录或单张扁图都可以当 `--input`。
 
 有 GPU 且权重已放到 `model/` 后：
 
@@ -30,7 +26,7 @@ python -m layerforge run --input test_input/image_no_sag/<file>.jpg --out runs -
 python scripts/download_models.py
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 python -m pip install sam2 hydra-core iopath
-python -m layerforge run --input test_input/image_no_sag/<file>.jpg --out runs --segment sam2.hinted --inpaint identity
+python -m layerforge run --input <flat.png> --out runs --segment sam2.hinted --inpaint identity
 ```
 
 ## 模型路径
