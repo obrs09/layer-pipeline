@@ -1,0 +1,11 @@
+name: cascade
+protocol: SegmentBackend
+# Order is sequential. Do not run AniSeg / Tagger / DINO / SAM in parallel.
+character: aniseg
+tagger: wdtagger
+boxes: grounding_dino
+mask: sam3.text
+mask_fallback: sam2.hinted
+max_attempts: 4
+dino_threshold: 0.25
+tag_threshold: 0.35

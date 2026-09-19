@@ -35,6 +35,8 @@ def test_manifest_roundtrip():
     restored = validate_manifest(json.loads(json.dumps(data)))
     assert restored.layers[0].id == "20_body"
     assert restored.backend.segment == "noop_from_parts"
+    assert restored.missing == []
+    assert restored.layers[0].needs_click is False
 
 
 def test_rejects_wrong_schema():

@@ -22,6 +22,7 @@ class LayerMask:
     rgba: np.ndarray | None = None
     notes: str = ""
     score: float = 1.0
+    needs_click: bool = False
 
     @property
     def bbox(self) -> list[int]:

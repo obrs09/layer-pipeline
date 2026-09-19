@@ -6,6 +6,16 @@ normalize:
 segment:
   name: auto
 
+cascade:
+  max_attempts: 4
+  character: aniseg
+  tagger: wdtagger
+  boxes: grounding_dino
+  mask: sam3.text
+  mask_fallback: sam2.hinted
+  dino_threshold: 0.25
+  tag_threshold: 0.35
+
 inpaint:
   name: auto
   small_hole_backend: lama
@@ -19,6 +29,10 @@ compose:
 paths:
   model_root: model
   sam2_dir: model/sam2
+  sam3_dir: model/sam3
+  aniseg_dir: model/aniseg
+  wdtagger_dir: model/wdtagger
+  dino_dir: model/grounding_dino
   lama_dir: model/lama
   sd15_dir: model/sd15
 
@@ -40,3 +54,6 @@ qa:
 require_cuda_for:
   - sd15.anime
   - sam2.hinted
+  - cascade
+  - grounding_dino
+  - sam3.text

@@ -44,3 +44,12 @@ def test_eyes_are_not_merged_across_roles():
     out = refine_masks([left, right], load_taxonomy())
     roles = {layer.role for layer in out}
     assert roles == {"eye_l", "eye_r"}
+
+
+def test_mutex_face_wins_over_hair_back():
+    face = _mask("face", "face", 4, 4, h=12, w=12)
+    hair = _mask("hair_back", "hair", 4, 4, h=20, w=20)
+    out = refine_masks([hair, face], load_taxonomy())
+    by_role = {layer.role: layer for layer in out}
+    assert int((by_role["face"].visible > 0).sum()) == 12 * 12
+    assert int((by_role["hair_back"].visible > 0).sum()) == 20 * 20 - 12 * 12

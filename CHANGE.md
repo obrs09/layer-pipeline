@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — 检测级联切件（不假定姿态）
+
+- 做了：扁图默认 `cascade`：AniSeg 抠角色 → WDTagger 对照 taxonomy 做库存 → 只对库存件 Grounding DINO 出框 → SAM3 文本或 SAM2 框+正负点出 mask；每件可用性打分，不合格换 query/后端，最多 4 次，失败写入 `manifest.missing` / `needs_click`。taxonomy 增加 queries / required / required_if_tags / skip_if_tags / cut_priority。mutex 按优先级（eye > face > hair_front > hair_back）。Imagine 跳过 1–4，只检查可用性并补切缺件。去掉姿态 `region_prompts`。**没改 .venv、没实现 future/ 视觉对齐**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`scripts/download_models.py` 后 `.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag/grok-image-4034a197-286e-45f1-8049-60f91c89d8a8.jpg --out runs --segment cascade --inpaint auto --job-id sam_flat2`
+- 产物路径：`runs/sam_flat2`（本机，需 AniSeg/WD/DINO 权重）；契约测试不加载这些模型
+- 未做 / 已知缺陷：本机还没有 AniSeg/WDTagger/DINO/SAM3 权重时 cascade 会报错（SAM2 仍可用 `--segment sam2.hinted`）。SAM3 包未装则跳过文本步。`[gpu]` 声明了 onnxruntime-gpu，需要自己装。线稿对齐未做
+
 ## 2026-09-18 — seam 不得画出遮挡层
 
 - 做了：`plan_occlusion` 的 seam 膨胀之后裁回 occluder 可见区（且不含本层 visible）。修复 `runs/sam_flat1` 里 `preview/diff.png` 发丝/脸/校徽描边：那是后层 occluded 盖住前层原图像素，不是 reproject 失效（各层 visible 与原图差为 0）。**没改 SAM、region_prompts、.venv**

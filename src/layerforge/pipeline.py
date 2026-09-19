@@ -67,7 +67,12 @@ def run_pipeline(
     log.write("backends", segment=segment.name, inpaint=inpaint.name)
 
     masks = segment.segment(source, ingested.hints)
-    log.write("segment", count=len(masks))
+    log.write(
+        "segment",
+        count=len(masks),
+        inventory=list(getattr(segment, "inventory", []) or []),
+        missing=list(getattr(segment, "missing", []) or []),
+    )
     masks = assign_roles(masks, source, taxonomy)
     log.write("roles", roles=[m.role for m in masks])
     refine_cfg = cfg.get("refine") or {}
@@ -141,10 +146,14 @@ def run_pipeline(
                 source=layer.source,
                 complete=complete,
                 notes=layer.notes,
+                needs_click=bool(getattr(layer, "needs_click", False)),
             )
         )
         log.write("layer", id=layer_id, role=layer.role, complete=complete)
 
+    missing = list(getattr(segment, "missing", []) or [])
+    if missing:
+        log.write("missing", roles=missing)
     manifest = Manifest(
         schema=SCHEMA,
         job_id=job_id,
@@ -156,6 +165,7 @@ def run_pipeline(
             compose=(cfg.get("compose") or {}).get("name", "reproject_v1"),
         ),
         layers=records,
+        missing=missing,
     )
     validate_manifest(manifest.to_dict())
     export_png_pack(

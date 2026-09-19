@@ -31,7 +31,12 @@ def refine_masks(
     # Specific (small) sprites win over nested larger dumps of the same pixels.
     non_overlay = [layer for layer in kept if not taxonomy.spec(layer.role).overlay]
     overlay = [layer for layer in kept if taxonomy.spec(layer.role).overlay]
-    non_overlay.sort(key=lambda m: int((m.visible > 0).sum()))
+    non_overlay.sort(
+        key=lambda m: (
+            -taxonomy.spec(m.role).cut_priority,
+            int((m.visible > 0).sum()),
+        )
+    )
     for layer in non_overlay:
         pix = layer.visible > 0
         visible = pix & ~claimed

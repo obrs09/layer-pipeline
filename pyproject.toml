@@ -23,6 +23,8 @@ gpu = [
   "transformers",
   "accelerate",
   "safetensors",
+  "onnxruntime-gpu",
+  "huggingface_hub",
 ]
 lama = ["simple-lama-inpainting"]
 psd = ["pytoshop"]

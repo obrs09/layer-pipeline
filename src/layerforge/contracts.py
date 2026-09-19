@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
 SCHEMA = "layerforge.manifest.v1"
@@ -35,6 +35,7 @@ class LayerRecord:
     source: str
     complete: bool
     notes: str = ""
+    needs_click: bool = False
 
 
 @dataclass
@@ -45,6 +46,7 @@ class Manifest:
     canvas: Canvas
     backend: BackendInfo
     layers: list[LayerRecord] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -55,7 +57,7 @@ class Manifest:
             raise ValueError(f"unsupported manifest schema: {data.get('schema')}")
         canvas = Canvas(**data["canvas"])
         backend = BackendInfo(**data["backend"])
-        layers = [LayerRecord(**layer) for layer in data.get("layers", [])]
+        layers = [_layer_from_dict(layer) for layer in data.get("layers", [])]
         return cls(
             schema=data["schema"],
             job_id=data["job_id"],
@@ -63,7 +65,13 @@ class Manifest:
             canvas=canvas,
             backend=backend,
             layers=layers,
+            missing=list(data.get("missing") or []),
         )
+
+
+def _layer_from_dict(data: dict[str, Any]) -> LayerRecord:
+    allowed = {item.name for item in fields(LayerRecord)}
+    return LayerRecord(**{key: value for key, value in data.items() if key in allowed})
 
 
 def validate_manifest(data: dict[str, Any]) -> Manifest:

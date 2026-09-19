@@ -1,20 +1,26 @@
-"""Download SAM2 / LaMa / SD1.5 weights into model/ (gitignored)."""
+"""Download detect / SAM / inpaint weights into model/ (gitignored)."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SAM2_DIR = ROOT / "model" / "sam2"
 LAMA_DIR = ROOT / "model" / "lama"
 SD15_DIR = ROOT / "model" / "sd15"
+ANISEG_DIR = ROOT / "model" / "aniseg"
+WD_DIR = ROOT / "model" / "wdtagger"
+DINO_DIR = ROOT / "model" / "grounding_dino"
 
 SAM2_URL = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
 SAM2_NAME = "sam2.1_hiera_large.pt"
 LAMA_REPO = "okaris/simple-lama"
 LAMA_FILE = "big-lama.pt"
 SD15_REPO = "stable-diffusion-v1-5/stable-diffusion-inpainting"
+ANISEG_REPO = "skytnt/anime-seg"
+ANISEG_FILE = "isnetis.onnx"
+WD_REPO = "SmilingWolf/wd-swinv2-tagger-v3"
+DINO_REPO = "IDEA-Research/grounding-dino-tiny"
 
 
 def _download_url(url: str, dest: Path) -> None:
@@ -62,6 +68,16 @@ def main() -> int:
         print(f"direct SAM2 failed ({exc}); trying Hugging Face")
         _hf_file("facebook/sam2.1-hiera-large", SAM2_NAME, SAM2_DIR)
 
+    print("AniSeg…")
+    _hf_file(ANISEG_REPO, ANISEG_FILE, ANISEG_DIR)
+
+    print("WDTagger…")
+    _hf_file(WD_REPO, "model.onnx", WD_DIR)
+    _hf_file(WD_REPO, "selected_tags.csv", WD_DIR)
+
+    print("Grounding DINO…")
+    _hf_snapshot(DINO_REPO, DINO_DIR)
+
     print("LaMa…")
     try:
         _hf_file(LAMA_REPO, LAMA_FILE, LAMA_DIR)
@@ -72,6 +88,7 @@ def main() -> int:
     print("SD1.5 inpaint…")
     _hf_snapshot(SD15_REPO, SD15_DIR)
     print("done")
+    print("SAM3 is optional: put a checkpoint in model/sam3/ if you have it.")
     return 0
 
 

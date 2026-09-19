@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask
-from layerforge.backends.segment.sam_hinted import region_prompt_boxes
 from layerforge.ops.assign_roles import assign_roles
 from layerforge.taxonomy import load_taxonomy
 
@@ -73,16 +72,3 @@ def test_leftover_unknown_becomes_acc():
     layers = [_layer("body", body), _layer("unknown_9", speck)]
     out = assign_roles(layers, rgba, load_taxonomy())
     assert out[1].role == "acc"
-
-
-def test_region_prompt_boxes_use_yaml_fractions():
-    boxes = region_prompt_boxes(
-        [10, 20, 100, 200],
-        {
-            "face": {"top": 0.1, "bottom": 0.4, "left": 0.25, "right": 0.75},
-            "clothes": {"top": 0.3, "bottom": 0.9, "left": 0.1, "right": 0.9},
-        },
-    )
-    roles = {role: xyxy for role, xyxy in boxes}
-    assert roles["face"] == [35.0, 40.0, 85.0, 100.0]
-    assert roles["clothes"][1] == 80.0

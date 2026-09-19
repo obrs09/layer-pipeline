@@ -30,8 +30,8 @@ python -m venv .venv
 ```text
 .\.venv\Scripts\python.exe scripts/download_models.py
 .\.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-.\.venv\Scripts\python.exe -m pip install sam2 hydra-core iopath diffusers transformers accelerate safetensors
-.\.venv\Scripts\python.exe -m layerforge run --input <flat.png> --out runs --segment sam2.hinted --inpaint auto
+.\.venv\Scripts\python.exe -m pip install sam2 hydra-core iopath diffusers transformers accelerate safetensors onnxruntime-gpu huggingface_hub
+.\.venv\Scripts\python.exe -m layerforge run --input <flat.png> --out runs --segment cascade --inpaint auto
 ```
 
 ## 模型路径
@@ -39,12 +39,17 @@ python -m venv .venv
 把权重放进仓库根目录的 `model/`（不进 git）：
 
 ```text
+model/aniseg/isnetis.onnx
+model/wdtagger/model.onnx
+model/wdtagger/selected_tags.csv
+model/grounding_dino/     # Grounding DINO snapshot
 model/sam2/*.pt
+model/sam3/*.pt           # optional; cascade falls back to SAM2
 model/lama/*.pt
-model/sd15/          # Diffusers 目录或 .safetensors
+model/sd15/               # Diffusers 目录或 .safetensors
 ```
 
-本机需要 GPU 才能跑 SAM2 / SD1.5。检测不到 CUDA 会直接报错，不会偷偷用 CPU 跑 SD。小洞走 LaMa（失败则 OpenCV Telea），大洞走 SD1.5。`--dry-run` 仍是 identity。
+扁图默认走 cascade（AniSeg → WDTagger 库存 → DINO 框 → SAM3/SAM2），不假定姿态。Imagine 已分块只做可用性检查，不合格才补切。本机需要 GPU 才能跑检测 / SAM / SD。检测不到 CUDA 会直接报错。小洞走 LaMa（失败则 OpenCV Telea），大洞走 SD1.5。`--dry-run` 仍是 identity。
 
 ## Imagine 分块（实际导出）
 

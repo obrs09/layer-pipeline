@@ -1,3 +1,7 @@
+# Closed role set. Detection queries live here, not in code.
+# cut_priority: higher claims overlapping pixels first (eye > face > hair_front > hair_back).
+# WDTagger: required / required_if_tags / skip_if_tags. Never assume pose.
+
 roles:
   bg:
     order: 0
@@ -5,20 +9,43 @@ roles:
     overlay: false
     expand_px: 0
     occluded_by: []
+    cut_priority: 0
+    required: false
+    queries: []
     aliases: [background, white-bed-sheet, bed-sheet]
+
   hair_back:
     order: 10
     complete: true
     overlay: false
     expand_px: 24
     occluded_by: [body, arm_l, arm_r, clothes, face, hair_front, acc]
+    cut_priority: 65
+    required: false
+    required_if_tags: [long_hair, ponytail, twintails, braid, hair_over_shoulder]
+    skip_if_tags: [bald]
+    tag_names: [long_hair, ponytail, twintails]
+    queries: ["back hair", "long hair behind", "hair from behind"]
+    exclude_roles: [face, hair_front]
     aliases: [hair-back, long-hair-back]
+    usable:
+      min_area_frac: 0.02
+      max_area_frac: 0.55
+      max_components: 6
+      min_box_cover: 0.35
+      max_out_of_box: 0.55
+      max_overlap_frac: 0.55
+
   body:
     order: 20
     complete: true
     overlay: false
     expand_px: 20
     occluded_by: [arm_l, arm_r, clothes, face, hair_front, acc]
+    cut_priority: 30
+    required: true
+    queries: ["anime torso", "bare skin body"]
+    exclude_roles: [face, hair_front, hair_back, clothes]
     aliases:
       - skin
       - torso
@@ -27,26 +54,66 @@ roles:
       - bare-legs
       - white-haired-anime-girl
       - anime-girl
+    usable:
+      min_area_frac: 0.03
+      max_area_frac: 0.85
+      max_components: 8
+      min_box_cover: 0.25
+      max_out_of_box: 0.6
+      max_overlap_frac: 0.7
+
   arm_l:
     order: 25
     complete: true
     overlay: false
     expand_px: 18
     occluded_by: [clothes, hair_front, acc]
+    cut_priority: 45
+    required: false
+    required_if_tags: [bare_arms, sleeveless]
+    tag_names: [bare_arms, arm]
+    queries: ["left arm", "left arm anime"]
+    exclude_roles: [clothes, body]
     aliases: [left-arm, arm-left]
+    usable:
+      min_area_frac: 0.004
+      max_area_frac: 0.22
+      max_components: 2
+      min_box_cover: 0.4
+      max_out_of_box: 0.45
+      max_overlap_frac: 0.45
+
   arm_r:
     order: 26
     complete: true
     overlay: false
     expand_px: 18
     occluded_by: [clothes, hair_front, acc]
+    cut_priority: 45
+    required: false
+    required_if_tags: [bare_arms, sleeveless]
+    tag_names: [bare_arms, arm]
+    queries: ["right arm", "right arm anime"]
+    exclude_roles: [clothes, body]
     aliases: [right-arm, arm-right]
+    usable:
+      min_area_frac: 0.004
+      max_area_frac: 0.22
+      max_components: 2
+      min_box_cover: 0.4
+      max_out_of_box: 0.45
+      max_overlap_frac: 0.45
+
   clothes:
     order: 40
     complete: true
     overlay: false
     expand_px: 16
     occluded_by: [arm_l, arm_r, hair_front, acc]
+    cut_priority: 50
+    required: true
+    queries: ["anime clothes", "school uniform", "dress", "shirt"]
+    exclude_roles: [face, hair_front]
     aliases:
       - dress
       - gown
@@ -55,63 +122,174 @@ roles:
       - purple-cape
       - cape
       - shirt
+    usable:
+      min_area_frac: 0.04
+      max_area_frac: 0.7
+      max_components: 6
+      min_box_cover: 0.35
+      max_out_of_box: 0.5
+      max_overlap_frac: 0.4
+
   face:
     order: 50
     complete: true
     overlay: false
     expand_px: 8
     occluded_by: [hair_front, acc]
+    cut_priority: 80
+    required: true
+    queries: ["anime face", "face", "girl face"]
+    exclude_roles: [hair_front, hair_back, clothes]
     aliases: [head]
+    usable:
+      min_area_frac: 0.01
+      max_area_frac: 0.28
+      max_components: 2
+      min_box_cover: 0.5
+      max_out_of_box: 0.35
+      max_overlap_frac: 0.35
+
   brow_l:
     order: 55
     complete: false
     overlay: true
     expand_px: 4
     occluded_by: [hair_front]
+    cut_priority: 95
+    required: false
+    required_if_tags: [eyebrows]
+    queries: ["left eyebrow", "left brow anime"]
+    exclude_roles: [eye_l, hair_front]
     aliases: [left-brow, eyebrow-l]
+    usable:
+      min_area_frac: 0.0002
+      max_area_frac: 0.02
+      max_components: 1
+      min_box_cover: 0.4
+      max_out_of_box: 0.5
+      max_overlap_frac: 0.3
+
   brow_r:
     order: 56
     complete: false
     overlay: true
     expand_px: 4
     occluded_by: [hair_front]
+    cut_priority: 95
+    required: false
+    required_if_tags: [eyebrows]
+    queries: ["right eyebrow", "right brow anime"]
+    exclude_roles: [eye_r, hair_front]
     aliases: [right-brow, eyebrow-r]
+    usable:
+      min_area_frac: 0.0002
+      max_area_frac: 0.02
+      max_components: 1
+      min_box_cover: 0.4
+      max_out_of_box: 0.5
+      max_overlap_frac: 0.3
+
   eye_l:
     order: 60
     complete: false
     overlay: true
     expand_px: 4
     occluded_by: [hair_front]
+    cut_priority: 100
+    required: true
+    queries: ["left eye", "left eye anime"]
+    exclude_roles: [face, hair_front]
     aliases: [left-eye]
+    usable:
+      min_area_frac: 0.0006
+      max_area_frac: 0.06
+      max_components: 1
+      min_box_cover: 0.5
+      max_out_of_box: 0.35
+      max_overlap_frac: 0.22
+
   eye_r:
     order: 61
     complete: false
     overlay: true
     expand_px: 4
     occluded_by: [hair_front]
+    cut_priority: 100
+    required: true
+    queries: ["right eye", "right eye anime"]
+    exclude_roles: [face, hair_front]
     aliases: [right-eye]
+    usable:
+      min_area_frac: 0.0006
+      max_area_frac: 0.06
+      max_components: 1
+      min_box_cover: 0.5
+      max_out_of_box: 0.35
+      max_overlap_frac: 0.22
+
   mouth:
     order: 65
     complete: false
     overlay: true
     expand_px: 4
     occluded_by: []
+    cut_priority: 90
+    required: false
+    required_if_tags: [open_mouth, smile, lips]
+    queries: ["mouth", "anime mouth", "lips"]
+    exclude_roles: [face]
     aliases: [lips]
+    usable:
+      min_area_frac: 0.0004
+      max_area_frac: 0.03
+      max_components: 1
+      min_box_cover: 0.45
+      max_out_of_box: 0.4
+      max_overlap_frac: 0.2
+
   hair_front:
     order: 80
     complete: true
     overlay: false
     expand_px: 16
     occluded_by: [acc]
+    cut_priority: 70
+    required: false
+    required_if_tags: [bangs, twintails, long_hair, blunt_bangs, hair_over_one_eye]
+    skip_if_tags: [bald]
+    tag_names: [bangs, blunt_bangs]
+    queries: ["bangs", "front hair", "hair over face"]
+    exclude_roles: [face, eye_l, eye_r]
     aliases:
       - bangs
       - pink-and-purple-hair
+    usable:
+      min_area_frac: 0.008
+      max_area_frac: 0.35
+      max_components: 5
+      min_box_cover: 0.4
+      max_out_of_box: 0.45
+      max_overlap_frac: 0.4
+
   acc:
     order: 90
     complete: false
     overlay: true
     expand_px: 0
     occluded_by: []
+    cut_priority: 60
+    required: false
+    required_if_tags:
+      - ribbon
+      - hair_ribbon
+      - hair_ornament
+      - earrings
+      - jewelry
+      - necklace
+      - hair_bow
+    tag_threshold: 0.5
+    queries: ["hair ribbon", "earring", "hair ornament", "necklace"]
+    exclude_roles: []
     aliases:
       - accessory
       - jewelry
@@ -127,14 +305,19 @@ roles:
       - gold-star-hair-ornament
       - flower-hair-clip
       - hair-ribbon
+    usable:
+      min_area_frac: 0.0003
+      max_area_frac: 0.12
+      max_components: 3
+      min_box_cover: 0.4
+      max_out_of_box: 0.5
+      max_overlap_frac: 0.8
 
-# Labels that share a stem and should be split left/right by centroid x.
 pair_roles:
   eye: [eye_l, eye_r]
   brow: [brow_l, brow_r]
   arm: [arm_l, arm_r]
 
-# Imagine captions that map to a pair family instead of a single role.
 pair_aliases:
   pink-eyes: eye
   multicolored-eyes: eye

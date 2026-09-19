@@ -6,24 +6,6 @@ import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
 from layerforge.config import resolve_path
-from layerforge.image_io import bbox_from_mask
-
-
-def region_prompt_boxes(fg_bbox: list[int], specs: dict) -> list[tuple[str, list[float]]]:
-    """Map taxonomy role → xyxy box inside the foreground bbox using YAML fractions."""
-    x, y, w, h = fg_bbox
-    out: list[tuple[str, list[float]]] = []
-    for role, spec in (specs or {}).items():
-        if not isinstance(spec, dict):
-            continue
-        x0 = x + int(float(spec.get("left", 0.0)) * w)
-        y0 = y + int(float(spec.get("top", 0.0)) * h)
-        x1 = x + int(float(spec.get("right", 1.0)) * w)
-        y1 = y + int(float(spec.get("bottom", 1.0)) * h)
-        if x1 - x0 < 8 or y1 - y0 < 8:
-            continue
-        out.append((str(role), [float(x0), float(y0), float(x1), float(y1)]))
-    return out
 
 
 class SamHintedSegment:
@@ -103,10 +85,35 @@ class SamHintedSegment:
         except Exception:
             self._generator = None
 
-    def segment(self, image: np.ndarray, hints: SegmentHints) -> list[LayerMask]:
+    def prepare(self, rgb: np.ndarray) -> None:
         self._load()
+        self._predictor.set_image(rgb[:, :, :3] if rgb.ndim == 3 and rgb.shape[2] >= 3 else rgb)
+
+    def predict_box_points(
+        self,
+        box: list[float] | None,
+        positive: list[tuple[float, float]] | None = None,
+        negative: list[tuple[float, float]] | None = None,
+    ) -> tuple[np.ndarray | None, float]:
+        """One multimask pick. Never average. Same prompts are not re-run here."""
+        self._load()
+        kw: dict = {"multimask_output": True}
+        if box is not None:
+            kw["box"] = np.array(box, dtype=np.float32)
+        pos = list(positive or [])
+        neg = list(negative or [])
+        if pos or neg:
+            pts = pos + neg
+            labs = [1] * len(pos) + [0] * len(neg)
+            kw["point_coords"] = np.array(pts, dtype=np.float32)
+            kw["point_labels"] = np.array(labs, dtype=np.int32)
+        masks, scores, _ = self._predictor.predict(**kw)
+        chosen = self._pick(masks, scores)
+        return (chosen.astype(np.uint8) * 255), float(np.max(scores))
+
+    def segment(self, image: np.ndarray, hints: SegmentHints) -> list[LayerMask]:
+        self.prepare(image)
         rgb = image[:, :, :3]
-        self._predictor.set_image(rgb)
         if hints.parts:
             return self._from_parts(hints.parts)
         if hints.boxes or hints.positive_points:
@@ -206,7 +213,6 @@ class SamHintedSegment:
                 score=float(np.max(scores)),
             )
         ]
-        layers.extend(self._region_role_masks(fg, [x, y, bw, bh], body))
         if self._generator is None:
             return layers
         extras = self._generator.generate(rgb)
@@ -235,36 +241,9 @@ class SamHintedSegment:
             unknown_i += 1
         return layers
 
-    def _region_role_masks(self, fg: np.ndarray, fg_bbox: list[int], body: np.ndarray) -> list[LayerMask]:
-        specs = self._backend.get("region_prompts") or {}
-        layers: list[LayerMask] = []
-        for role, xyxy in region_prompt_boxes(fg_bbox, specs):
-            masks, scores, _ = self._predictor.predict(
-                box=np.array(xyxy, dtype=np.float32),
-                multimask_output=True,
-            )
-            chosen = self._pick(masks, scores) & fg
-            if int(chosen.sum()) < 64:
-                continue
-            inter = int((chosen & body).sum())
-            union = int((chosen | body).sum())
-            if union and inter / union > 0.92:
-                continue
-            layers.append(
-                LayerMask(
-                    role=role,
-                    label=f"sam_{role}",
-                    visible=(chosen.astype(np.uint8) * 255),
-                    source="sam",
-                    notes=f"sam2 region box for {role}; multimask pick-one",
-                    score=float(np.max(scores)),
-                )
-            )
-        return layers
-
 
 class Sam3HintedSegment:
     name = "sam3.hinted"
 
     def segment(self, image, hints: SegmentHints) -> list[LayerMask]:
-        raise RuntimeError("sam3.hinted is not implemented in v0. Use sam2.hinted.")
+        raise RuntimeError("sam3.hinted is not the cascade text adapter. Use --segment cascade.")
