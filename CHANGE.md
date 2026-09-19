@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — seam 不得画出遮挡层
+
+- 做了：`plan_occlusion` 的 seam 膨胀之后裁回 occluder 可见区（且不含本层 visible）。修复 `runs/sam_flat1` 里 `preview/diff.png` 发丝/脸/校徽描边：那是后层 occluded 盖住前层原图像素，不是 reproject 失效（各层 visible 与原图差为 0）。**没改 SAM、region_prompts、.venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest && .\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag/grok-image-4034a197-286e-45f1-8049-60f91c89d8a8.jpg --out runs --segment sam2.hinted --inpaint auto --job-id sam_flat1`
+- 产物路径：`runs/sam_flat1`（重跑后 `preview/diff.png` 可见区应近黑）
+- 未做 / 已知缺陷：`50_face` 仍是区域框切到的头发/耳环；`10_hair_back` 仍会在脸洞里补绘（body 吃了残差脸，taxonomy 认为头发在 body 下）。这是 SAM/切件问题，这轮不改
+
 ## 2026-09-18 — 项目内 .venv
 
 - 做了：本机虚拟环境放到仓库 `.venv/`；gitignore 增加 `venv/` `env/`（`.venv/` 本来就忽略）。README 和 `.vscode/settings.json` 都指向 `.venv\\Scripts\\python.exe`。**没改 SAM / 形态学算法**

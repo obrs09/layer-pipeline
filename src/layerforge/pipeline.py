@@ -91,8 +91,8 @@ def run_pipeline(
         source,
         taxonomy,
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
+        seam_dilate_px=int((cfg.get("inpaint") or {}).get("seam_dilate_px", 2)),
     )
-    seam = int((cfg.get("inpaint") or {}).get("seam_dilate_px", 2))
 
     ids = _layer_ids(masks, taxonomy)
     layers_rgba: dict[str, np.ndarray] = {}
@@ -111,11 +111,6 @@ def run_pipeline(
     for idx, (layer_id, layer) in enumerate(zip(ids, masks)):
         visible = layer.visible
         occluded = occ_map.get(idx, np.zeros_like(visible))
-        if seam and int((occluded > 0).sum()) > 0:
-            import cv2
-
-            occluded = cv2.dilate(occluded, np.ones((3, 3), np.uint8), iterations=seam)
-            occluded[visible > 0] = 0
         occ_for_fill = occluded if not identity else np.zeros_like(visible)
         if identity or int((occluded > 0).sum()) == 0:
             filled = source
