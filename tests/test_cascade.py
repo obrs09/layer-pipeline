@@ -268,7 +268,7 @@ def test_body_residual_punches_clothes_and_hair():
     assert body.visible[70, 48] == 0
     assert body.visible[20, 48] == 0
     assert body.visible[120, 48] > 0
-    assert body.visible[49, 48] > 0
+    assert body.visible[49, 48] == 0
 
 
 def test_rank_boxes_skips_giant_hair_box():
@@ -315,3 +315,54 @@ def test_inventory_hair_front_failure_is_missing():
     )
     cascade.segment(_image(), SegmentHints())
     assert "hair_front" in cascade.missing
+
+
+class _Pose:
+    name = "dwpose"
+
+    def __init__(self, person, boxes=None):
+        self.person = person
+        self.boxes = boxes or {}
+
+    def estimate(self, image):
+        from layerforge.backends.detect.dwpose import PoseEstimate
+
+        overlay = np.zeros_like(image[:, :, :3])
+        return PoseEstimate(
+            person_mask=self.person,
+            keypoints=[],
+            boxes=self.boxes,
+            points={},
+            overlay=overlay,
+            person_box=[0, 0, 10, 10],
+        )
+
+
+def test_pose_clips_character_and_body_residual():
+    person = np.zeros((48, 48), dtype=np.uint8)
+    person[10:40, 12:36] = 255
+    cascade = CascadeSegment(
+        {"refine": {"morph_open_px": 0}},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99}),
+        boxes=_Dino({}),
+        sam3=_Sam3({}),
+        sam2=_Sam2(None),
+        pose=_Pose(person, boxes={"body": [14.0, 16.0, 34.0, 38.0]}),
+    )
+    image = _image()
+    layers = cascade.segment(image, SegmentHints())
+    assert int(cascade.character_mask[0, 0]) == 0
+    assert int(cascade.character_mask[20, 20]) == 255
+    body = next(layer for layer in layers if layer.role == "body")
+    assert int(body.visible[2, 2]) == 0
+    assert "pose person" in body.notes
+
+
+def test_inject_pose_box_goes_first():
+    cascade = CascadeSegment({}, load_taxonomy())
+    cascade.pose_boxes = {"body": [4.0, 5.0, 10.0, 12.0]}
+    ranked = cascade._inject_pose_box("body", [[0.0, 0.0, 40.0, 40.0]])
+    assert ranked[0] == [4.0, 5.0, 10.0, 12.0]
+    assert ranked[1] == [0.0, 0.0, 40.0, 40.0]

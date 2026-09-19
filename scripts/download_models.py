@@ -24,6 +24,9 @@ WD_REPO = "SmilingWolf/wd-swinv2-tagger-v3"
 DINO_REPO = "IDEA-Research/grounding-dino-tiny"
 SAM3_REPO = "facebook/sam3"
 SAM3_FILES = ("sam3.pt", "config.json")
+DWPOSE_DIR = ROOT / "model" / "dwpose"
+DWPOSE_REPO = "fashn-ai/DWPose"
+DWPOSE_FILES = ("yolox_l.onnx", "dw-ll_ucoco_384.onnx")
 
 
 def _download_url(url: str, dest: Path) -> None:
@@ -84,6 +87,18 @@ def _download_detect() -> None:
             "Request access at https://huggingface.co/facebook/sam3 then `hf auth login`."
         )
 
+    print("DWPose…")
+    try:
+        for name in DWPOSE_FILES:
+            _hf_file(DWPOSE_REPO, name, DWPOSE_DIR)
+    except Exception as exc:
+        print(f"{DWPOSE_REPO} failed ({exc}); trying IDEA-Research/DWPose filenames")
+        try:
+            _hf_file("yzd-v/DWPose", "yolox_l.onnx", DWPOSE_DIR)
+            _hf_file("yzd-v/DWPose", "dw-ll_ucoco_384.onnx", DWPOSE_DIR)
+        except Exception as exc2:
+            print(f"DWPose download failed ({exc2}). Put yolox_l.onnx and dw-ll_ucoco_384.onnx in model/dwpose/")
+
 
 def main() -> int:
     import argparse
@@ -92,9 +107,26 @@ def main() -> int:
     parser.add_argument(
         "--only-detect",
         action="store_true",
-        help="anime-segmentation / WDTagger / DINO / SAM3 only (skip SAM2, LaMa, SD1.5)",
+        help="anime-segmentation / WDTagger / DINO / SAM3 / DWPose only (skip SAM2, LaMa, SD1.5)",
+    )
+    parser.add_argument(
+        "--only-dwpose",
+        action="store_true",
+        help="YOLOX + DWPose ONNX only",
     )
     args = parser.parse_args()
+
+    if args.only_dwpose:
+        print("DWPose…")
+        try:
+            for name in DWPOSE_FILES:
+                _hf_file(DWPOSE_REPO, name, DWPOSE_DIR)
+        except Exception as exc:
+            print(f"{DWPOSE_REPO} failed ({exc}); trying yzd-v/DWPose")
+            _hf_file("yzd-v/DWPose", "yolox_l.onnx", DWPOSE_DIR)
+            _hf_file("yzd-v/DWPose", "dw-ll_ucoco_384.onnx", DWPOSE_DIR)
+        print("done")
+        return 0
 
     if not args.only_detect:
         print("SAM2…")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from layerforge.backends.detect.anime_segmentation import AniSegCut, AnimeSegmentationCut
+from layerforge.backends.detect.dwpose import DwPoseEstimate
 from layerforge.backends.detect.grounding_dino import GroundingDinoBoxes
 from layerforge.backends.detect.wdtagger import WdTagger
 from layerforge.backends.inpaint.router import RoutedInpaint
@@ -51,6 +52,7 @@ def _build_cascade(cfg: dict, dry_run: bool) -> CascadeSegment:
         boxes=None if dry_run else GroundingDinoBoxes(cfg),
         sam3=None if dry_run else Sam3TextMasker(cfg),
         sam2=None if dry_run else SamHintedSegment(cfg),
+        pose=None if dry_run else _build_pose(cfg),
         dry_run=dry_run,
     )
 
@@ -64,6 +66,15 @@ def _build_character(cfg: dict, *, allow_luma: bool):
     if name not in mapping:
         raise ValueError(f"unknown character backend: {name}")
     return mapping[name]()
+
+
+def _build_pose(cfg: dict):
+    name = (cfg.get("cascade") or {}).get("pose", "dwpose")
+    if not name or str(name).lower() in {"none", "off", "false"}:
+        return None
+    if name == "dwpose":
+        return DwPoseEstimate(cfg)
+    raise ValueError(f"unknown pose backend: {name}")
 
 
 def build_inpaint(name: str, cfg: dict, dry_run: bool):

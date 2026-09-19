@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask
+from layerforge.ops.morph import morph_open
 from layerforge.ops.normalize import foreground_mask
 from layerforge.taxonomy import Taxonomy
 
@@ -14,6 +15,7 @@ def refine_masks(
     mutex: bool = True,
     overlay_iou: float = 0.5,
     overlay_contain: float = 0.75,
+    morph_open_px: int = 0,
 ) -> list[LayerMask]:
     kept: list[LayerMask] = []
     for layer in layers:
@@ -42,6 +44,9 @@ def refine_masks(
         visible = pix & ~claimed
         claimed |= pix
         layer.visible = visible.astype(np.uint8) * 255
+        if morph_open_px > 0:
+            layer.visible = morph_open(layer.visible, morph_open_px)
+            visible = layer.visible > 0
         if layer.rgba is not None:
             rgba = layer.rgba.copy()
             rgba[~visible, 3] = 0

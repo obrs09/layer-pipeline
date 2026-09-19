@@ -3,6 +3,9 @@ protocol: SegmentBackend
 # Order is sequential. Do not run character cut / Tagger / DINO / SAM in parallel.
 character: anime_segmentation
 character_size: 1024
+pose: dwpose
+pose_score: 0.3
+pose_dilate_px: 72
 tagger: wdtagger
 boxes: grounding_dino
 mask: sam3.text

@@ -108,3 +108,13 @@ def test_mutex_face_wins_over_hair_back():
     by_role = {layer.role: layer for layer in out}
     assert int((by_role["face"].visible > 0).sum()) == 12 * 12
     assert int((by_role["hair_back"].visible > 0).sum()) == 20 * 20 - 12 * 12
+
+
+def test_morph_open_drops_one_pixel_rim():
+    hair = _mask("hair_back", "hair", 4, 4, h=12, w=16)
+    body = _mask("body", "body", 16, 4, h=12, w=16)
+    body.visible[2, 4:20] = 255
+    out = refine_masks([hair, body], load_taxonomy(), morph_open_px=2)
+    by_role = {layer.role: layer for layer in out}
+    assert int(by_role["body"].visible[2, 10]) == 0
+    assert int(by_role["body"].visible[20, 10]) == 255

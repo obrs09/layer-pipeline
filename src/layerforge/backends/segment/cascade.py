@@ -5,15 +5,18 @@ from dataclasses import replace
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
+from layerforge.backends.detect.dwpose import clip_character_to_person
 from layerforge.ops.inventory import build_inventory
+from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.usable import usable
 from layerforge.taxonomy import Taxonomy, load_taxonomy
 
 
 class CascadeSegment:
-    """anime-segmentation → WDTagger inventory → DINO box → SAM3/SAM2 mask → usable retry.
+    """anime-segmentation → DWPose clip/hints → WDTagger → DINO → SAM3/SAM2.
 
-    Closed role set. Do not assume pose. Never average SAM. Max 4 attempts / role.
+    Pose is hints, not inventory. Body is anatomical (pose person minus clothes/hair),
+    not leftover rims. Never average SAM. Max 4 attempts / role.
     Imagine parts skip detect 1–4 and only check / recut failures.
     """
 
@@ -29,6 +32,7 @@ class CascadeSegment:
         boxes=None,
         sam3=None,
         sam2=None,
+        pose=None,
         dry_run: bool = False,
     ) -> None:
         self.cfg = cfg
@@ -38,11 +42,14 @@ class CascadeSegment:
         self.boxes = boxes
         self.sam3 = sam3
         self.sam2 = sam2
+        self.pose = pose
         self.dry_run = dry_run
         cascade_cfg = cfg.get("cascade") or {}
         self.max_attempts = int(cascade_cfg.get("max_attempts", 4))
         self.dino_threshold = float(cascade_cfg.get("dino_threshold", 0.25))
         self.tag_threshold = float(cascade_cfg.get("tag_threshold", 0.35))
+        refine_cfg = cfg.get("refine") or {}
+        self.morph_open_px = int(refine_cfg.get("morph_open_px", 2))
         self.missing: list[str] = []
         self.needs_click: list[str] = []
         self.inventory: list[str] = []
@@ -51,6 +58,9 @@ class CascadeSegment:
         self.debug_boxes: list[dict] = []
         self.cut_failures: list[dict] = []
         self.character_mask = None
+        self.pose_person = None
+        self.pose_boxes: dict[str, list[float]] = {}
+        self.pose_points: dict[str, list[tuple[float, float]]] = {}
 
     def bind_dump(self, dump) -> None:
         self.dump = dump
@@ -63,12 +73,16 @@ class CascadeSegment:
         self.debug_boxes = []
         self.cut_failures = []
         self.character_mask = None
+        self.pose_person = None
+        self.pose_boxes = {}
+        self.pose_points = {}
         if hints.parts:
             return self._from_parts(image, hints.parts)
         return self._from_flat(image)
 
     def _from_flat(self, image: np.ndarray) -> list[LayerMask]:
         character = self._cut_character(image)
+        character = self._clip_with_pose(image, character)
         self._dump_character(image, character)
         tags = self._tag(image)
         self.tags = dict(tags)
@@ -204,6 +218,23 @@ class CascadeSegment:
         self.character_mask = mask
         return mask
 
+    def _clip_with_pose(self, image: np.ndarray, character: np.ndarray) -> np.ndarray:
+        if self.dump is not None:
+            self.dump.write_character_raw(image, character)
+        if self.pose is None:
+            return character
+        estimate = self.pose.estimate(image)
+        if estimate is None:
+            return character
+        if self.dump is not None:
+            self.dump.write_pose(image, estimate)
+        clipped = clip_character_to_person(character, estimate.person_mask)
+        self.pose_person = estimate.person_mask
+        self.pose_boxes = dict(estimate.boxes or {})
+        self.pose_points = dict(estimate.points or {})
+        self.character_mask = clipped
+        return clipped
+
     def _tag(self, image: np.ndarray) -> dict[str, float]:
         if self.tagger is None:
             raise RuntimeError("cascade needs a Tagger backend (WDTagger).")
@@ -236,42 +267,50 @@ class CascadeSegment:
                 if mask is None:
                     last_reasons.append(f"sam3_empty:{query}")
                     continue
+                if not spec.overlay:
+                    mask = morph_open(mask, self.morph_open_px)
                 result = usable(mask, spec, character, others, None)
                 last_reasons = result.reasons
                 if result.ok:
                     return _layer(role, result.mask, result.score, f"sam3.text query={query}")
                 last_reasons.append(f"sam3_unusable:{query}")
 
-        if self.boxes is None or self.sam2 is None:
+        if self.sam2 is None:
             self._record_failure(role, last_reasons)
             return None
         for query in queries:
             if attempts >= self.max_attempts:
                 break
             attempts += 1
-            detections = self.boxes.detect(image, [query], threshold)
-            if not detections:
-                threshold = max(0.08, threshold * 0.7)
-                detections = self.boxes.detect(image, [query], threshold)
-            if not detections:
-                last_reasons.append(f"no_box:{query}")
-                continue
-            if role.endswith("_l") or role.endswith("_r"):
-                ranked = [_pick_box(detections, character, role)]
+            detections: list = []
+            if self.boxes is not None:
+                detections = self.boxes.detect(image, [query], threshold) or []
+                if not detections:
+                    threshold = max(0.08, threshold * 0.7)
+                    detections = self.boxes.detect(image, [query], threshold) or []
+            if detections:
+                if role.endswith("_l") or role.endswith("_r"):
+                    ranked = [_pick_box(detections, character, role)]
+                else:
+                    ranked = _rank_boxes(detections, character, spec)
             else:
-                ranked = _rank_boxes(detections, character, spec)
-            if not ranked:
+                ranked = []
                 last_reasons.append(f"no_box:{query}")
+            ranked = self._inject_pose_box(role, ranked)
+            if not ranked:
                 continue
             for box in ranked[:2]:
                 self._trace_box(role, query, box, detections)
                 pos = [_box_center(box)]
+                pos.extend(self.pose_points.get(role) or [])
                 neg = _neighbor_negatives(others, spec.exclude_roles)
                 mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
                 if mask is None:
                     last_reasons.append(f"sam2_empty:{query}")
                     continue
                 mask = _constrain_mask(mask, character, box)
+                if not spec.overlay:
+                    mask = morph_open(mask, self.morph_open_px)
                 result = usable(mask, spec, character, others, box)
                 last_reasons = list(result.reasons)
                 if result.ok:
@@ -490,22 +529,39 @@ class CascadeSegment:
             if self.taxonomy.spec(layer.role).overlay:
                 continue
             claimed |= layer.visible > 0
+        if self.morph_open_px > 0:
+            claimed = dilate_mask(claimed.astype(np.uint8) * 255, self.morph_open_px) > 0
         residual = (character > 0) & ~claimed
+        if self.pose_person is not None:
+            residual = residual & (self.pose_person > 0)
         mask = residual.astype(np.uint8) * 255
+        mask = morph_open(mask, self.morph_open_px)
         spec = self.taxonomy.spec("body")
-        result = usable(mask, spec, character, others, None)
+        result = usable(mask, spec, character, others, self.pose_boxes.get("body"))
+        notes = "pose person residual" if self.pose_person is not None else "character residual"
         if result.ok:
-            return _layer("body", result.mask, result.score, "character residual")
-        if self.boxes is not None and self.sam2 is not None:
+            return _layer("body", result.mask, result.score, notes)
+        if self.sam2 is not None:
             layer = self._cut_one(image, character, "body", others)
             if layer is not None:
                 punched = (layer.visible > 0) & ~claimed
-                layer.visible = punched.astype(np.uint8) * 255
+                if self.pose_person is not None:
+                    punched = punched & (self.pose_person > 0)
+                layer.visible = morph_open(punched.astype(np.uint8) * 255, self.morph_open_px)
                 if int((layer.visible > 0).sum()) >= 64:
+                    layer.notes = f"{layer.notes}; {notes}"
                     return layer
-        if int(residual.sum()) >= 64:
-            return _layer("body", mask, 0.4, "character residual weak")
+        if int((mask > 0).sum()) >= 64:
+            return _layer("body", mask, 0.4, f"{notes} weak")
         return None
+
+    def _inject_pose_box(self, role: str, ranked: list[list[float]]) -> list[list[float]]:
+        box = self.pose_boxes.get(role)
+        if not box:
+            return ranked
+        key = tuple(round(float(v), 1) for v in box)
+        rest = [item for item in ranked if tuple(round(float(v), 1) for v in item) != key]
+        return [[float(v) for v in box], *rest]
 
     def _mark_missing(self, role: str) -> None:
         if role not in self.missing:

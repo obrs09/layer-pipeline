@@ -43,3 +43,11 @@ class TextMasker(Protocol):
         character: np.ndarray,
     ) -> np.ndarray | None:
         ...
+
+
+class PoseEstimator(Protocol):
+    name: str
+
+    def estimate(self, image: np.ndarray):
+        """Person skeleton / hull used as hints. None if weights or person missing."""
+        ...

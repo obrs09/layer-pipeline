@@ -36,7 +36,9 @@ def test_step_dump_character(tmp_path: Path):
     mask = np.zeros((8, 10), dtype=np.uint8)
     mask[2:6, 3:8] = 255
     dump.write_character(image, mask)
+    dump.write_character_raw(image, mask)
     rgba = np.array(Image.open(tmp_path / "steps" / "01_character" / "rgba.png"))
+    assert (tmp_path / "steps" / "01_character" / "raw.png").exists()
     assert rgba.shape[2] == 4
     assert int(rgba[0, 0, 3]) == 0
     assert int(rgba[3, 4, 3]) == 255

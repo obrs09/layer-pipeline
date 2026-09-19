@@ -1,1 +1,1 @@
-# Detect backends: anime-segmentation, WDTagger, Grounding DINO, SAM3 text.
+# Detect backends: anime-segmentation, WDTagger, Grounding DINO, DWPose, SAM3 text.

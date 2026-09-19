@@ -90,6 +90,31 @@ class StepDump:
             tint_overlay(image, [(mask, (0, 210, 255))]),
         )
 
+    def write_character_raw(self, image: np.ndarray, mask: np.ndarray) -> None:
+        if not self.enabled:
+            return
+        self.write_png("01_character/raw_mask.png", mask)
+        self.write_png("01_character/raw.png", masked_rgba(image, mask))
+
+    def write_pose(self, image: np.ndarray, estimate) -> None:
+        if not self.enabled or estimate is None:
+            return
+        person = estimate.person_mask
+        self.write_png("01_pose/person.png", person)
+        self.write_png("01_pose/rgba.png", masked_rgba(image, person))
+        overlay = getattr(estimate, "overlay", None)
+        if overlay is not None:
+            self.write_png("01_pose/overlay.png", overlay)
+        self.write_json(
+            "01_pose/keypoints.json",
+            {
+                "person_box": list(getattr(estimate, "person_box", []) or []),
+                "boxes": dict(getattr(estimate, "boxes", {}) or {}),
+                "keypoints": list(getattr(estimate, "keypoints", []) or []),
+                "notes": str(getattr(estimate, "notes", "") or ""),
+            },
+        )
+
     def write_boxes(self, image: np.ndarray, boxes: list[dict]) -> None:
         if not self.enabled:
             return

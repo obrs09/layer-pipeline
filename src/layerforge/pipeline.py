@@ -100,6 +100,7 @@ def run_pipeline(
         mutex=bool(refine_cfg.get("mutex", True)),
         overlay_iou=float(refine_cfg.get("overlay_iou", 0.5)),
         overlay_contain=float(refine_cfg.get("overlay_contain", 0.75)),
+        morph_open_px=int(refine_cfg.get("morph_open_px", 2)),
     )
     masks = assign_residual_to_body(
         masks,

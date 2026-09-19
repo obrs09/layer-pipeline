@@ -9,6 +9,9 @@ segment:
 cascade:
   max_attempts: 4
   character: anime_segmentation
+  pose: dwpose
+  pose_score: 0.3
+  pose_dilate_px: 72
   tagger: wdtagger
   boxes: grounding_dino
   mask: sam3.text
@@ -33,6 +36,7 @@ paths:
   sam3_dir: model/sam3
   aniseg_dir: model/aniseg
   anime_segmentation_dir: model/aniseg
+  dwpose_dir: model/dwpose
   wdtagger_dir: model/wdtagger
   dino_dir: model/grounding_dino
   lama_dir: model/lama
@@ -49,6 +53,7 @@ refine:
   overlay_contain: 0.75
   residual_max_frac: 0.04
   seam_fill_px: 24
+  morph_open_px: 2
 
 occlusion:
   background_luma: 250

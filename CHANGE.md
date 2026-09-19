@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 形态学收边 + DWPose 提示身体
+
+- 做了：mutex 后对非 overlay 做 `morph_open_px=2`，body 残差先把已切件膨胀 2px 再扣，去掉头发/衣服留在皮肤上的细边。加 `PoseEstimator` / DWPose（YOLOX+RTMPose ONNX）：骨架提示 face/body/arm 框和正点；二次元 YOLOX 经常检不到人时回退整图再估姿态。角色 mask 用骨架+躯干凸包+头部膨胀去裁 isnet（不把张开的四肢凸包填成床）。`body` 只表示姿态里的解剖身体/露肤，不是发缘或家具残差。`7d9f70f9` 已不测。本机重跑 `runs/flat`（新图 `296a4352` 替换了 7d9f）。**没改 schema、没改 .venv、没装 mmpose**
+- 怎么跑：`.\.venv\Scripts\python.exe scripts/download_models.py --only-dwpose` ；`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/`。先看 `steps/01_character/raw.png`（isnet）vs `rgba.png`（pose 裁过）和 `steps/01_pose/overlay.png`。4034a197：`04_segment/20_body` 基本是皮肤，细发缘没了，`missing=[eye_r]`，头发仍成层。9083053e：isnet 把床/窗帘连进角色（人躺在同色家具上），pose 裁掉大部分床和窗帘，头附近枕头/床头板还在；`missing=[clothes]`（睡裙常进 body）。45825594 `missing=[]`。a1639e70 `missing=[]`
+- 未做 / 已知缺陷：前景遮挡（原 7d9f）没做。9083053e 头周围仍有枕头，睡裙没单独成衣服层。躺姿骨架膨胀盖不住裙摆时衣服会缺。`layers/20_body` 仍可能含 complete 层补绘。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 修夜景外圈、切件顺序和过大框
 
 - 做了：seam fill / residual 只在 anime-segmentation 角色 mask 里填缝，夜景不再贴到 body 外圈。切件改成衣服/脸 → 头发 → 眼睛，头发负点能打在衣服和脸上。SAM mask 裁回框（+12px）。过大的 DINO 框让位给更贴角色比例的框。hair_front 失败会进 missing。本机重跑 `runs/flat` 6 张。**没改 schema、没改 .venv、没装 SAM3**
