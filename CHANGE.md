@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — DINO API + manifest v2 + sam_flat2
+
+- 做了：Grounding DINO 后处理按 transformers 签名传 `threshold`（旧版仍走 `box_threshold`）。`missing` / `needs_click` 升到 `layerforge.manifest.v2`，v1 读入会补默认值。本机跑通 `--segment cascade --inpaint auto --job-id sam_flat2`。**没改 .venv、没装 SAM3**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest && .\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag/grok-image-4034a197-286e-45f1-8049-60f91c89d8a8.jpg --out runs --segment cascade --inpaint auto --job-id sam_flat2`
+- 产物路径：`runs/sam_flat2`（schema v2；layers: body/clothes/face/eye_l；`missing: [eye_r]`）
+- 未做 / 已知缺陷：右眼未切出。SAM3 仍无权重，文本步跳过走 SAM2。ORT CUDA 仍缺 `cublasLt64_13.dll`，AniSeg/WD 回退 CPU EP（警告，不挡这次跑通）。头发未进库存（tagger 没给 bangs/long_hair 或未过阈值）
+
 ## 2026-09-18 — 下载 cascade 检测权重
 
 - 做了：`scripts/download_models.py --only-detect` 增加 SAM3 尝试；本机已写入 AniSeg / WDTagger / Grounding DINO。**没改切件算法、没改 .venv**

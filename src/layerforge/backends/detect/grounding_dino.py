@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from layerforge.config import resolve_path
+
+
+def post_process_boxes(processor, outputs, input_ids, threshold: float, target_sizes):
+    """Call processor post-process with transformers 4.x box_threshold or 5.x threshold."""
+    sig = inspect.signature(processor.post_process_grounded_object_detection)
+    params = sig.parameters
+    kwargs: dict = {"target_sizes": target_sizes}
+    if "input_ids" in params:
+        kwargs["input_ids"] = input_ids
+    if "threshold" in params:
+        kwargs["threshold"] = float(threshold)
+    elif "box_threshold" in params:
+        kwargs["box_threshold"] = float(threshold)
+    if "text_threshold" in params:
+        kwargs["text_threshold"] = float(threshold)
+    return processor.post_process_grounded_object_detection(outputs, **kwargs)[0]
 
 
 class GroundingDinoBoxes:
@@ -78,13 +95,13 @@ class GroundingDinoBoxes:
         with torch.no_grad():
             outputs = self._model(**inputs)
         h, w = image.shape[:2]
-        results = self._processor.post_process_grounded_object_detection(
+        results = post_process_boxes(
+            self._processor,
             outputs,
-            inputs["input_ids"],
-            box_threshold=float(threshold),
-            text_threshold=float(threshold),
-            target_sizes=[(h, w)],
-        )[0]
+            inputs.get("input_ids"),
+            float(threshold),
+            [(h, w)],
+        )
         boxes = []
         labels = results.get("labels") or results.get("text_labels") or []
         scores = results.get("scores")

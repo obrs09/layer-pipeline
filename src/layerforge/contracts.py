@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
-SCHEMA = "layerforge.manifest.v1"
+SCHEMA = "layerforge.manifest.v2"
+SCHEMA_V1 = "layerforge.manifest.v1"
 
 LayerSource = Literal["imagine_part", "sam", "manual", "silhouette"]
 
@@ -53,13 +54,13 @@ class Manifest:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Manifest:
-        if data.get("schema") != SCHEMA:
+        if data.get("schema") not in {SCHEMA, SCHEMA_V1}:
             raise ValueError(f"unsupported manifest schema: {data.get('schema')}")
         canvas = Canvas(**data["canvas"])
         backend = BackendInfo(**data["backend"])
         layers = [_layer_from_dict(layer) for layer in data.get("layers", [])]
         return cls(
-            schema=data["schema"],
+            schema=SCHEMA,
             job_id=data["job_id"],
             source=data["source"],
             canvas=canvas,

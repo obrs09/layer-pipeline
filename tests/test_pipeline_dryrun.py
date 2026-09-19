@@ -51,7 +51,7 @@ def test_pipeline_dryrun_imagine(tmp_path: Path):
         inpaint_name="identity",
     )
     manifest = (out / "manifest.json").read_text(encoding="utf-8")
-    assert "layerforge.manifest.v1" in manifest
+    assert "layerforge.manifest.v2" in manifest
     assert (out / "preview" / "stack.png").exists()
     assert (out / "preview" / "diff.png").exists()
     assert list((out / "layers").glob("*.png"))

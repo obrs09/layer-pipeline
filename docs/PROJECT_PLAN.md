@@ -77,7 +77,7 @@ out/<job_id>/
 
 ```json
 {
-  "schema": "layerforge.manifest.v1",
+  "schema": "layerforge.manifest.v2",
   "job_id": "...",
   "source": "source.png",
   "canvas": {"w": 2048, "h": 2048},
@@ -97,9 +97,11 @@ out/<job_id>/
       "bbox": [x, y, w, h],
       "source": "imagine_part|sam|manual",
       "complete": true,
-      "notes": ""
+      "notes": "",
+      "needs_click": false
     }
-  ]
+  ],
+  "missing": []
 }
 ```
 
@@ -180,7 +182,7 @@ layerforge/
     PROJECT_PLAN.md         # 本文件
 ```
 
-扩展规则：新能力 = 新 backend 或 `future/` 里填实现，**禁止**改 `manifest.v1` 字段含义。要加字段就出 `v2` 并写迁移。
+扩展规则：新能力 = 新 backend 或 `future/` 里填实现，**禁止**改已发布 schema 的字段含义。要加字段就出下一版并写迁移。当前契约是 `manifest.v2`（v1 读入时补 `missing` / `needs_click`）。
 
 ## 6. 后端替换方式
 

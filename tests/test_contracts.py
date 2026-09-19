@@ -5,8 +5,36 @@ import json
 from layerforge.contracts import SCHEMA, BackendInfo, Canvas, LayerRecord, Manifest, validate_manifest
 
 
-def test_schema_is_v1():
-    assert SCHEMA == "layerforge.manifest.v1"
+def test_schema_is_v2():
+    assert SCHEMA == "layerforge.manifest.v2"
+
+
+def test_v1_manifest_migrates_to_v2():
+    data = {
+        "schema": "layerforge.manifest.v1",
+        "job_id": "old",
+        "source": "source.png",
+        "canvas": {"w": 8, "h": 8},
+        "backend": {"segment": "a", "inpaint": "b", "compose": "c"},
+        "layers": [
+            {
+                "id": "20_body",
+                "role": "body",
+                "order": 20,
+                "file": "layers/20_body.png",
+                "mask_visible": "masks/20_body.png",
+                "mask_occluded": None,
+                "bbox": [0, 0, 4, 4],
+                "source": "sam",
+                "complete": True,
+                "notes": "",
+            }
+        ],
+    }
+    restored = validate_manifest(data)
+    assert restored.schema == "layerforge.manifest.v2"
+    assert restored.missing == []
+    assert restored.layers[0].needs_click is False
 
 
 def test_manifest_roundtrip():
@@ -41,7 +69,7 @@ def test_manifest_roundtrip():
 
 def test_rejects_wrong_schema():
     data = {
-        "schema": "layerforge.manifest.v2",
+        "schema": "layerforge.manifest.v9",
         "job_id": "x",
         "source": "source.png",
         "canvas": {"w": 1, "h": 1},
