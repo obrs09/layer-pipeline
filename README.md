@@ -13,10 +13,14 @@ Cursor 规则和 Skill 只留本机（`.cursor/`、`skills/`，不进 git）。�
 
 ## 跑
 
+解释器固定为仓库里的 `.venv`（不进 git）。Windows：
+
 ```text
-python -m pip install -e ".[dev]"
-python -m layerforge run --input <本机图片或 Imagine 目录> --out runs --dry-run
-python -m pytest
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m layerforge run --input <本机图片或 Imagine 目录> --out runs --dry-run
 ```
 
 测试图放本机 `test_input/`（不进 git）。Imagine 分块目录或单张扁图都可以当 `--input`。
@@ -24,10 +28,10 @@ python -m pytest
 有 GPU 且权重已放到 `model/` 后：
 
 ```text
-python scripts/download_models.py
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-python -m pip install sam2 hydra-core iopath
-python -m layerforge run --input <flat.png> --out runs --segment sam2.hinted --inpaint auto
+.\.venv\Scripts\python.exe scripts/download_models.py
+.\.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+.\.venv\Scripts\python.exe -m pip install sam2 hydra-core iopath diffusers transformers accelerate safetensors
+.\.venv\Scripts\python.exe -m layerforge run --input <flat.png> --out runs --segment sam2.hinted --inpaint auto
 ```
 
 ## 模型路径

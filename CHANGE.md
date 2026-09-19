@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — 项目内 .venv
+
+- 做了：本机虚拟环境放到仓库 `.venv/`；gitignore 增加 `venv/` `env/`（`.venv/` 本来就忽略）。README 和 `.vscode/settings.json` 都指向 `.venv\\Scripts\\python.exe`。**没改 SAM / 形态学算法**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pip install -e ".[dev]"` 后用这个 python 跑 pytest / layerforge
+- 产物路径：本机 `.venv/`（不进 git）
+- 未做 / 已知缺陷：mask 质量问题仍在（区域框切件 + mutex，SAM 结果几乎不做开闭运算）。`.venv` 里的 GPU 包要按 README 再装一遍，不会从 Anaconda 自动拷过来
+
 ## 2026-09-18 — 扁图 role + 真补绘
 
 - 做了：扁图 SAM 按 `segment_sam2.yaml` 的 `region_prompts` 切 `hair_back` / `face` / `clothes`（multimask 择一，不平均）；剩余 `unknown_*` 用几何+肤色启发式标 taxonomy role，标不出的归 `acc`。默认 `inpaint.name=auto`：洞面积 ≤ `small_hole_max_px` 走 LaMa（失败则 OpenCV Telea），更大走 SD1.5；只在 occluded 上补，可见区 reproject。SD 优先加载 `*inpainting*.ckpt`。补了 assign_roles / router / region box 测试。本机 `sam_flat1` 已跑通
