@@ -163,3 +163,53 @@ def assign_residual_to_body(
         )
     )
     return layers
+
+
+def assign_unclaimed_seams(
+    layers: list[LayerMask],
+    source: np.ndarray,
+    taxonomy: Taxonomy,
+    background_luma: int = 250,
+    max_dist: float = 24.0,
+) -> list[LayerMask]:
+    """Fill unclaimed fg that sits within max_dist of an existing non-overlay layer.
+
+    Catches punch/mutex gaps. Far leftover blobs stay unassigned.
+    """
+    if not layers or max_dist <= 0:
+        return layers
+    import cv2
+
+    fg = foreground_mask(source, background_luma) > 0
+    claimed = np.zeros(fg.shape, dtype=bool)
+    for layer in layers:
+        claimed |= layer.visible > 0
+    residual = fg & ~claimed
+    if int(residual.sum()) == 0:
+        return layers
+    dist_claimed = cv2.distanceTransform((~claimed).astype(np.uint8), cv2.DIST_L2, 5)
+    seam = residual & (dist_claimed <= float(max_dist))
+    if int(seam.sum()) == 0:
+        return layers
+    candidates = [
+        idx for idx, layer in enumerate(layers) if not taxonomy.spec(layer.role).overlay
+    ]
+    if not candidates:
+        candidates = list(range(len(layers)))
+    best_d = np.full(fg.shape, np.inf, dtype=np.float32)
+    best_i = np.full(fg.shape, -1, dtype=np.int32)
+    for idx in candidates:
+        inv = np.ones(fg.shape, dtype=np.uint8)
+        inv[layers[idx].visible > 0] = 0
+        dist = cv2.distanceTransform(inv, cv2.DIST_L2, 5)
+        better = dist < best_d
+        best_d[better] = dist[better]
+        best_i[better] = idx
+    for idx in candidates:
+        add = seam & (best_i == idx)
+        if int(add.sum()) == 0:
+            continue
+        vis = (layers[idx].visible > 0) | add
+        layers[idx].visible = vis.astype(np.uint8) * 255
+        layers[idx].notes = f"{layers[idx].notes}; seam filled".strip("; ")
+    return layers

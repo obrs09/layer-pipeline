@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — body 打洞不再留黑缝
+
+- 做了：`_body_from_residual` 只按 hair/clothes/face 的真实 mask 扣，不再 `expand_px` 膨胀打洞。refine 后把距已有非 overlay 层 ≤ `seam_fill_px`（默认 24）的未认领前景缝归最近层。修 `sam_flat3` stack 发/颈/领口黑洞。**没改 schema、没改 .venv、没顺手修 eye_r / hair_back**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest && .\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag/grok-image-4034a197-286e-45f1-8049-60f91c89d8a8.jpg --out runs --segment cascade --inpaint auto --job-id sam_flat3`
+- 产物路径：`runs/sam_flat3`（schema v2；前景 hole=0；preview/stack 发颈领口贴合原图）
+- 未做 / 已知缺陷：`eye_r`、`hair_back` 仍 missing。不再膨胀打洞后，发缘和领口残片回到 `20_body`（宁可贴层上也不留洞）。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 成对切眼 + body 打洞 + 保存 WDTagger
 
 - 做了：眼睛按 pair 切（family query + 左右 query 分开、脸裁切再检、镜面补框，失败再回退 `_cut_one`）。`hair_back` 默认进库存（bald 除外）；body 残差打掉膨胀后的 hair/clothes/face，大块未认领前景不再折进 body。WDTagger 预处理改成 v3 白边正方形 + BICUBIC + BGR 0–255 NHWC，结果写入 `logs/tags.json`（不改 manifest schema）。本机重跑 `sam_flat3`。**没改 .venv、没升 schema、没实现 future/**

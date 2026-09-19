@@ -16,7 +16,7 @@ from layerforge.logutil import RunLog, write_tags_json
 from layerforge.ops.assign_roles import assign_roles
 from layerforge.ops.normalize import resize_max_side, to_rgba
 from layerforge.ops.occlusion import plan_occlusion
-from layerforge.ops.refine import assign_residual_to_body, refine_masks
+from layerforge.ops.refine import assign_residual_to_body, assign_unclaimed_seams, refine_masks
 from layerforge.ops.reproject import reproject
 from layerforge.taxonomy import Taxonomy, load_taxonomy
 
@@ -99,6 +99,13 @@ def run_pipeline(
         min_area=int(refine_cfg.get("min_area", 64)),
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
         max_frac=float(refine_cfg.get("residual_max_frac", 0.04)),
+    )
+    masks = assign_unclaimed_seams(
+        masks,
+        source,
+        taxonomy,
+        background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
+        max_dist=float(refine_cfg.get("seam_fill_px", 24)),
     )
     log.write("refine", count=len(masks))
     occ_map = plan_occlusion(

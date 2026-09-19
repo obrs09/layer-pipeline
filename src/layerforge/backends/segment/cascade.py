@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import cv2
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.usable import usable
 from layerforge.taxonomy import Taxonomy, load_taxonomy
-
-_BODY_PUNCH_ROLES = {"clothes", "hair_back", "hair_front"}
 
 
 class CascadeSegment:
@@ -441,18 +438,9 @@ class CascadeSegment:
     ) -> LayerMask | None:
         claimed = np.zeros(character.shape, dtype=bool)
         for layer in others:
-            spec = self.taxonomy.spec(layer.role)
-            if spec.overlay:
+            if self.taxonomy.spec(layer.role).overlay:
                 continue
-            vis = (layer.visible > 0).astype(np.uint8)
-            extra = 0
-            if layer.role in _BODY_PUNCH_ROLES:
-                extra = min(int(spec.expand_px), 16)
-            elif layer.role == "face":
-                extra = min(int(spec.expand_px), 4)
-            if extra > 0:
-                vis = _dilate(vis, extra)
-            claimed |= vis > 0
+            claimed |= layer.visible > 0
         residual = (character > 0) & ~claimed
         mask = residual.astype(np.uint8) * 255
         spec = self.taxonomy.spec("body")
@@ -538,14 +526,6 @@ def _neighbor_negatives(others: list[LayerMask], exclude_roles: tuple[str, ...])
             continue
         points.append((float(xs.mean()), float(ys.mean())))
     return points[:6]
-
-
-def _dilate(mask: np.ndarray, px: int) -> np.ndarray:
-    if px <= 0:
-        return mask
-    k = 2 * int(px) + 1
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-    return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1)
 
 
 def _box_iou(a: list[float], b: list[float]) -> float:

@@ -45,6 +45,7 @@ refine:
   overlay_iou: 0.5
   overlay_contain: 0.75
   residual_max_frac: 0.04
+  seam_fill_px: 24
 
 occlusion:
   background_luma: 250

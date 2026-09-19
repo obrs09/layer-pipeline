@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask
-from layerforge.ops.refine import assign_residual_to_body, refine_masks
+from layerforge.ops.refine import assign_residual_to_body, assign_unclaimed_seams, refine_masks
 from layerforge.taxonomy import load_taxonomy
 
 
@@ -63,6 +63,26 @@ def test_small_unclaimed_fg_folds_into_body():
     out = assign_residual_to_body([body], source, min_area=8, max_frac=0.2)
     assert int((out[0].visible > 0).sum()) > 16 * 16
     assert "folded" in out[0].notes
+
+
+def test_unclaimed_seam_goes_to_nearest_layer():
+    hair = _mask("hair_back", "hair", 2, 4, h=10, w=20)
+    body = _mask("body", "body", 16, 4, h=10, w=20)
+    source = np.full((32, 40, 3), 255, dtype=np.uint8)
+    source[2:26, 4:24] = 10
+    out = assign_unclaimed_seams([hair, body], source, load_taxonomy(), max_dist=8)
+    claimed = (out[0].visible > 0) | (out[1].visible > 0)
+    assert claimed[14, 10]
+    assert "seam filled" in out[0].notes or "seam filled" in out[1].notes
+
+
+def test_far_unclaimed_blob_not_seam_filled():
+    body = _mask("body", "body", 20, 4, h=8, w=8)
+    source = np.full((32, 40, 3), 255, dtype=np.uint8)
+    source[20:28, 4:12] = 10
+    source[2:8, 28:36] = 10
+    out = assign_unclaimed_seams([body], source, load_taxonomy(), max_dist=4)
+    assert int((out[0].visible[2:8, 28:36] > 0).sum()) == 0
 
 
 def test_mutex_face_wins_over_hair_back():

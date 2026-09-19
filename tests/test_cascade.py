@@ -268,3 +268,4 @@ def test_body_residual_punches_clothes_and_hair():
     assert body.visible[70, 48] == 0
     assert body.visible[20, 48] == 0
     assert body.visible[120, 48] > 0
+    assert body.visible[49, 48] > 0
