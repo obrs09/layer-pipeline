@@ -91,6 +91,7 @@ def run_pipeline(
     masks = assign_roles(masks, source, taxonomy)
     log.write("roles", roles=[m.role for m in masks])
     dump.write_layers("04_segment", source, masks, _layer_ids(masks, taxonomy))
+    domain = getattr(segment, "character_mask", None)
     refine_cfg = cfg.get("refine") or {}
     masks = refine_masks(
         masks,
@@ -106,6 +107,7 @@ def run_pipeline(
         min_area=int(refine_cfg.get("min_area", 64)),
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
         max_frac=float(refine_cfg.get("residual_max_frac", 0.04)),
+        domain=domain,
     )
     masks = assign_unclaimed_seams(
         masks,
@@ -113,6 +115,7 @@ def run_pipeline(
         taxonomy,
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
         max_dist=float(refine_cfg.get("seam_fill_px", 24)),
+        domain=domain,
     )
     log.write("refine", count=len(masks))
     ids = _layer_ids(masks, taxonomy)

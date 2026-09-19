@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 修夜景外圈、切件顺序和过大框
+
+- 做了：seam fill / residual 只在 anime-segmentation 角色 mask 里填缝，夜景不再贴到 body 外圈。切件改成衣服/脸 → 头发 → 眼睛，头发负点能打在衣服和脸上。SAM mask 裁回框（+12px）。过大的 DINO 框让位给更贴角色比例的框。hair_front 失败会进 missing。本机重跑 `runs/flat` 6 张。**没改 schema、没改 .venv、没装 SAM3**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/`。45825594 / 9083053e / a1639e70 的 `missing=[]`；4034a197 补上 `hair_back` 只缺 `eye_r`；64010c19 切出了 `face`，外圈夜景不再贴上，头发仍在 body（`hair_front`/`hair_back` missing）。失败原因：`steps/04_segment/failures.json`
+- 未做 / 已知缺陷：雪景图头发仍没单独成层（DINO 要么只框刘海要么框整个人）。`7d9f70f9` 眼睛仍缺。斗篷半透明里的雪是角色 mask 里的原图像素，不是 seam fill。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 落盘每步预览，扁图跑到 runs/flat
 
 - 做了：每步写到 `steps/`（01 角色抠图、02 tags、03 DINO 框、04 SAM 切件、05 refine、06 occlusion、07 inpaint 洞）。契约仍是 `layers/` `masks/` `preview/` `manifest.json`，没改 schema。`--input` 可以是扁图目录。job id 用 `grok-image-` 的 uuid 前 8 位。本机重跑 `test_input/image_no_sag` 全部 6 张单图。**没改切件算法、没改 .venv**

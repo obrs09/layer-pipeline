@@ -131,11 +131,14 @@ def assign_residual_to_body(
     min_area: int = 64,
     background_luma: int = 250,
     max_frac: float = 0.04,
+    domain: np.ndarray | None = None,
 ) -> list[LayerMask]:
     """Fold tiny unclaimed crumbs into body. Do not dump leftover hair/clothes."""
     if not layers:
         return layers
     fg = foreground_mask(source, background_luma) > 0
+    if domain is not None:
+        fg = fg & (domain > 0)
     claimed = np.zeros(fg.shape, dtype=bool)
     for layer in layers:
         claimed |= layer.visible > 0
@@ -171,16 +174,20 @@ def assign_unclaimed_seams(
     taxonomy: Taxonomy,
     background_luma: int = 250,
     max_dist: float = 24.0,
+    domain: np.ndarray | None = None,
 ) -> list[LayerMask]:
     """Fill unclaimed fg that sits within max_dist of an existing non-overlay layer.
 
     Catches punch/mutex gaps. Far leftover blobs stay unassigned.
+    Pass `domain` (character mask) so night/sky pixels outside the cut cannot join a layer.
     """
     if not layers or max_dist <= 0:
         return layers
     import cv2
 
     fg = foreground_mask(source, background_luma) > 0
+    if domain is not None:
+        fg = fg & (domain > 0)
     claimed = np.zeros(fg.shape, dtype=bool)
     for layer in layers:
         claimed |= layer.visible > 0

@@ -124,11 +124,11 @@ roles:
       - shirt
     usable:
       min_area_frac: 0.04
-      max_area_frac: 0.7
+      max_area_frac: 0.85
       max_components: 6
-      min_box_cover: 0.35
-      max_out_of_box: 0.5
-      max_overlap_frac: 0.4
+      min_box_cover: 0.25
+      max_out_of_box: 0.55
+      max_overlap_frac: 0.45
 
   face:
     order: 50
@@ -142,12 +142,12 @@ roles:
     exclude_roles: [hair_front, hair_back, clothes]
     aliases: [head]
     usable:
-      min_area_frac: 0.01
-      max_area_frac: 0.28
+      min_area_frac: 0.008
+      max_area_frac: 0.32
       max_components: 2
-      min_box_cover: 0.5
-      max_out_of_box: 0.35
-      max_overlap_frac: 0.35
+      min_box_cover: 0.28
+      max_out_of_box: 0.5
+      max_overlap_frac: 0.5
 
   brow_l:
     order: 55
@@ -258,18 +258,18 @@ roles:
     required_if_tags: [bangs, twintails, long_hair, blunt_bangs, hair_over_one_eye, white_hair, silver_hair, short_hair]
     skip_if_tags: [bald]
     tag_names: [bangs, blunt_bangs, white_hair]
-    queries: ["bangs", "front hair", "hair over face"]
-    exclude_roles: [face, eye_l, eye_r]
+    queries: ["bangs", "front hair", "hair over face", "anime hair", "long hair"]
+    exclude_roles: [face, eye_l, eye_r, clothes]
     aliases:
       - bangs
       - pink-and-purple-hair
     usable:
       min_area_frac: 0.008
-      max_area_frac: 0.35
+      max_area_frac: 0.50
       max_components: 5
-      min_box_cover: 0.4
-      max_out_of_box: 0.45
-      max_overlap_frac: 0.4
+      min_box_cover: 0.25
+      max_out_of_box: 0.55
+      max_overlap_frac: 0.45
 
   acc:
     order: 90

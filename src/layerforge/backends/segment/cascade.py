@@ -49,6 +49,8 @@ class CascadeSegment:
         self.tags: dict[str, float] = {}
         self.dump = None
         self.debug_boxes: list[dict] = []
+        self.cut_failures: list[dict] = []
+        self.character_mask = None
 
     def bind_dump(self, dump) -> None:
         self.dump = dump
@@ -59,6 +61,8 @@ class CascadeSegment:
         self.inventory = []
         self.tags = {}
         self.debug_boxes = []
+        self.cut_failures = []
+        self.character_mask = None
         if hints.parts:
             return self._from_parts(image, hints.parts)
         return self._from_flat(image)
@@ -73,10 +77,7 @@ class CascadeSegment:
         self._prepare_sam2(image)
         kept: list[LayerMask] = []
         skip_pair: set[str] = set()
-        ordered = sorted(
-            [role for role in inventory if role != "body"],
-            key=lambda role: -self.taxonomy.spec(role).cut_priority,
-        )
+        ordered = self._cut_order(inventory)
         for role in ordered:
             family = self.taxonomy.family_of_role(role)
             if family:
@@ -107,10 +108,11 @@ class CascadeSegment:
             if role == "acc":
                 kept.extend(self._cut_acc(image, character, kept))
                 continue
+            spec = self.taxonomy.spec(role)
             layer = self._cut_one(image, character, role, kept)
             if layer is not None:
                 kept.append(layer)
-            elif self.taxonomy.spec(role).required:
+            elif spec.required or spec.required_if_tags:
                 self._mark_missing(role)
         if "body" in inventory:
             body = self._body_from_residual(character, kept, image)
@@ -122,7 +124,29 @@ class CascadeSegment:
             if spec.required and spec.name not in {layer.role for layer in kept}:
                 self._mark_missing(spec.name)
         self._dump_boxes(image)
+        self._dump_failures()
         return kept
+
+    def _cut_order(self, inventory: list[str]) -> list[str]:
+        """Clothes/face before hair so SAM can use them as negatives. Overlays last."""
+        overlay: list[str] = []
+        mid: list[str] = []
+        for role in inventory:
+            if role == "body":
+                continue
+            if self.taxonomy.spec(role).overlay:
+                overlay.append(role)
+            else:
+                mid.append(role)
+
+        def mid_key(role: str):
+            if role in {"hair_front", "hair_back"}:
+                return (1, self.taxonomy.spec(role).order)
+            return (0, self.taxonomy.spec(role).order)
+
+        mid.sort(key=mid_key)
+        overlay.sort(key=lambda role: -self.taxonomy.spec(role).cut_priority)
+        return mid + overlay
 
     def _from_parts(self, image: np.ndarray, parts: list[LayerMask]) -> list[LayerMask]:
         character = np.zeros(image.shape[:2], dtype=np.uint8)
@@ -130,6 +154,7 @@ class CascadeSegment:
             character = np.maximum(character, (part.visible > 0).astype(np.uint8) * 255)
         if int((character > 0).sum()) < 32:
             character[:] = 255
+        self.character_mask = character
         self._dump_character(image, character)
         recut = not self.dry_run and self.sam2 is not None
         self.inventory = [part.role for part in parts]
@@ -167,6 +192,7 @@ class CascadeSegment:
                         continue
                 self._mark_missing(role)
         self._dump_boxes(image)
+        self._dump_failures()
         return kept
 
     def _cut_character(self, image: np.ndarray) -> np.ndarray:
@@ -175,6 +201,7 @@ class CascadeSegment:
         mask = self.character.cut(image)
         if int((mask > 0).sum()) < 64:
             raise RuntimeError("anime-segmentation produced an empty character mask.")
+        self.character_mask = mask
         return mask
 
     def _tag(self, image: np.ndarray) -> dict[str, float]:
@@ -216,6 +243,7 @@ class CascadeSegment:
                 last_reasons.append(f"sam3_unusable:{query}")
 
         if self.boxes is None or self.sam2 is None:
+            self._record_failure(role, last_reasons)
             return None
         for query in queries:
             if attempts >= self.max_attempts:
@@ -228,27 +256,34 @@ class CascadeSegment:
             if not detections:
                 last_reasons.append(f"no_box:{query}")
                 continue
-            box = _pick_box(detections, character, role)
-            self._trace_box(role, query, box, detections)
-            pos = [_box_center(box)]
-            neg = _neighbor_negatives(others, spec.exclude_roles)
-            mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
-            if mask is None:
-                last_reasons.append(f"sam2_empty:{query}")
+            if role.endswith("_l") or role.endswith("_r"):
+                ranked = [_pick_box(detections, character, role)]
+            else:
+                ranked = _rank_boxes(detections, character, spec)
+            if not ranked:
+                last_reasons.append(f"no_box:{query}")
                 continue
-            mask = ((mask > 0) & (character > 0)).astype(np.uint8) * 255
-            result = usable(mask, spec, character, others, box)
-            last_reasons = result.reasons
-            if result.ok:
-                return _layer(
-                    role,
-                    result.mask,
-                    min(result.score, float(sam_score)),
-                    f"sam2.box query={query}; score={sam_score:.3f}",
-                )
-            last_reasons.append(f"sam2_unusable:{query}")
+            for box in ranked[:2]:
+                self._trace_box(role, query, box, detections)
+                pos = [_box_center(box)]
+                neg = _neighbor_negatives(others, spec.exclude_roles)
+                mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
+                if mask is None:
+                    last_reasons.append(f"sam2_empty:{query}")
+                    continue
+                mask = _constrain_mask(mask, character, box)
+                result = usable(mask, spec, character, others, box)
+                last_reasons = list(result.reasons)
+                if result.ok:
+                    return _layer(
+                        role,
+                        result.mask,
+                        min(result.score, float(sam_score)),
+                        f"sam2.box query={query}; score={sam_score:.3f}",
+                    )
+                last_reasons.append(f"sam2_unusable:{query}")
         self.needs_click.append(role)
-        _ = last_reasons
+        self._record_failure(role, last_reasons)
         return None
 
     def _cut_pair(
@@ -350,7 +385,7 @@ class CascadeSegment:
                 if role not in self.needs_click:
                     self.needs_click.append(role)
                 continue
-            mask = ((mask > 0) & (character > 0)).astype(np.uint8) * 255
+            mask = _constrain_mask(mask, character, box)
             result = usable(mask, spec, character, others + layers, box)
             if result.ok:
                 layers.append(
@@ -361,8 +396,10 @@ class CascadeSegment:
                         f"sam2.pair family={family}; score={sam_score:.3f}",
                     )
                 )
-            elif role not in self.needs_click:
-                self.needs_click.append(role)
+            else:
+                self._record_failure(role, result.reasons)
+                if role not in self.needs_click:
+                    self.needs_click.append(role)
         return layers
 
     def _face_anchor(
@@ -433,7 +470,7 @@ class CascadeSegment:
             mask, sam_score = self.sam2.predict_box_points(xyxy, pos, neg)
             if mask is None:
                 continue
-            mask = ((mask > 0) & (character > 0)).astype(np.uint8) * 255
+            mask = _constrain_mask(mask, character, xyxy)
             result = usable(mask, spec, character, others + layers, xyxy)
             if not result.ok:
                 continue
@@ -502,6 +539,56 @@ class CascadeSegment:
                 "score": None if score is None else round(float(score), 4),
             }
         )
+
+    def _record_failure(self, role: str, reasons: list[str]) -> None:
+        self.cut_failures.append({"role": role, "reasons": list(reasons or [])})
+
+    def _dump_failures(self) -> None:
+        if self.dump is None or not self.cut_failures:
+            return
+        self.dump.write_json("04_segment/failures.json", self.cut_failures)
+
+
+def _constrain_mask(mask: np.ndarray, character: np.ndarray, box: list[float] | None, pad: int = 12) -> np.ndarray:
+    vis = (mask > 0) & (character > 0)
+    if box is None:
+        return vis.astype(np.uint8) * 255
+    h, w = vis.shape
+    x0, y0, x1, y1 = [int(round(v)) for v in box]
+    x0, y0 = max(0, x0 - pad), max(0, y0 - pad)
+    x1, y1 = min(w, x1 + pad), min(h, y1 + pad)
+    clipped = np.zeros_like(vis)
+    if x1 > x0 and y1 > y0:
+        clipped[y0:y1, x0:x1] = vis[y0:y1, x0:x1]
+    return clipped.astype(np.uint8) * 255
+
+
+def _rank_boxes(detections, character: np.ndarray, spec) -> list[list[float]]:
+    char = character > 0
+    char_area = max(1, int(char.sum()))
+    h, w = char.shape
+    scored: list[tuple] = []
+    seen: set[tuple] = set()
+    for item in detections:
+        box = item[1]
+        score = float(item[2]) if len(item) > 2 else 0.0
+        key = tuple(round(float(v), 1) for v in box)
+        if key in seen:
+            continue
+        seen.add(key)
+        x0, y0, x1, y1 = [int(round(v)) for v in box]
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(w, x1), min(h, y1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        inter = int(char[y0:y1, x0:x1].sum())
+        box_area = max(1, (x1 - x0) * (y1 - y0))
+        hit = inter / box_area
+        char_frac = inter / char_area
+        too_big = char_frac > max(spec.max_area_frac * 1.5, 0.12)
+        scored.append((too_big, -hit, -score, [float(v) for v in box]))
+    scored.sort()
+    return [item[-1] for item in scored]
 
 
 def _layer(role: str, mask: np.ndarray, score: float, notes: str) -> LayerMask:

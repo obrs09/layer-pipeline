@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
-from layerforge.backends.segment.cascade import CascadeSegment
+from layerforge.backends.segment.cascade import CascadeSegment, _constrain_mask, _rank_boxes
 from layerforge.taxonomy import load_taxonomy
 
 
@@ -269,3 +269,49 @@ def test_body_residual_punches_clothes_and_hair():
     assert body.visible[20, 48] == 0
     assert body.visible[120, 48] > 0
     assert body.visible[49, 48] > 0
+
+
+def test_rank_boxes_skips_giant_hair_box():
+    spec = load_taxonomy().spec("hair_front")
+    character = np.zeros((40, 40), dtype=np.uint8)
+    character[4:36, 4:36] = 255
+    huge = [0.0, 0.0, 40.0, 40.0]
+    bangs = [12.0, 4.0, 28.0, 12.0]
+    ranked = _rank_boxes(
+        [("front hair", huge, 0.9), ("bangs", bangs, 0.3)],
+        character,
+        spec,
+    )
+    assert ranked[0] == bangs
+
+
+def test_constrain_mask_clips_to_box():
+    mask = np.full((20, 20), 255, dtype=np.uint8)
+    character = np.full((20, 20), 255, dtype=np.uint8)
+    out = _constrain_mask(mask, character, [5.0, 5.0, 10.0, 10.0], pad=0)
+    assert int(out[0, 0]) == 0
+    assert int(out[7, 7]) == 255
+
+
+def test_cut_order_clothes_before_hair():
+    order = CascadeSegment({}, load_taxonomy())._cut_order(
+        ["hair_front", "clothes", "face", "eye_l", "body"]
+    )
+    assert order.index("clothes") < order.index("hair_front")
+    assert order.index("face") < order.index("hair_front")
+    assert order.index("eye_l") > order.index("hair_front")
+    assert "body" not in order
+
+
+def test_inventory_hair_front_failure_is_missing():
+    cascade = CascadeSegment(
+        {"cascade": {"max_attempts": 2}},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99, "long_hair": 0.9}),
+        boxes=_Dino({}),
+        sam3=_Sam3({}),
+        sam2=_Sam2(None),
+    )
+    cascade.segment(_image(), SegmentHints())
+    assert "hair_front" in cascade.missing

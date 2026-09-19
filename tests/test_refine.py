@@ -85,6 +85,22 @@ def test_far_unclaimed_blob_not_seam_filled():
     assert int((out[0].visible[2:8, 28:36] > 0).sum()) == 0
 
 
+def test_seam_fill_stays_inside_character_domain():
+    body = _mask("body", "body", 8, 8, h=8, w=8)
+    source = np.full((32, 40, 3), 10, dtype=np.uint8)
+    domain = np.zeros((32, 40), dtype=np.uint8)
+    domain[8:16, 8:16] = 255
+    out = assign_unclaimed_seams(
+        [body],
+        source,
+        load_taxonomy(),
+        max_dist=24,
+        domain=domain,
+    )
+    extra = (out[0].visible > 0) & (domain == 0)
+    assert int(extra.sum()) == 0
+
+
 def test_mutex_face_wins_over_hair_back():
     face = _mask("face", "face", 4, 4, h=12, w=12)
     hair = _mask("hair_back", "hair", 4, 4, h=20, w=20)
