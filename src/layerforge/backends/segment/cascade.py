@@ -11,7 +11,7 @@ from layerforge.taxonomy import Taxonomy, load_taxonomy
 
 
 class CascadeSegment:
-    """AniSeg → WDTagger inventory → DINO box → SAM3/SAM2 mask → usable retry.
+    """anime-segmentation → WDTagger inventory → DINO box → SAM3/SAM2 mask → usable retry.
 
     Closed role set. Do not assume pose. Never average SAM. Max 4 attempts / role.
     Imagine parts skip detect 1–4 and only check / recut failures.
@@ -161,10 +161,10 @@ class CascadeSegment:
 
     def _cut_character(self, image: np.ndarray) -> np.ndarray:
         if self.character is None:
-            raise RuntimeError("cascade needs a CharacterCut backend (AniSeg).")
+            raise RuntimeError("cascade needs a CharacterCut backend (anime-segmentation).")
         mask = self.character.cut(image)
         if int((mask > 0).sum()) < 64:
-            raise RuntimeError("AniSeg produced an empty character mask.")
+            raise RuntimeError("anime-segmentation produced an empty character mask.")
         return mask
 
     def _tag(self, image: np.ndarray) -> dict[str, float]:

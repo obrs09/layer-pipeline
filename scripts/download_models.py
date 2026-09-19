@@ -64,7 +64,7 @@ def _hf_snapshot(repo: str, dest_dir: Path) -> None:
 
 
 def _download_detect() -> None:
-    print("AniSeg…")
+    print("anime-segmentation (SkyTNT isnetis)…")
     _hf_file(ANISEG_REPO, ANISEG_FILE, ANISEG_DIR)
 
     print("WDTagger…")
@@ -92,7 +92,7 @@ def main() -> int:
     parser.add_argument(
         "--only-detect",
         action="store_true",
-        help="AniSeg / WDTagger / DINO / SAM3 only (skip SAM2, LaMa, SD1.5)",
+        help="anime-segmentation / WDTagger / DINO / SAM3 only (skip SAM2, LaMa, SD1.5)",
     )
     args = parser.parse_args()
 

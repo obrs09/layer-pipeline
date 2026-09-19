@@ -49,7 +49,7 @@ model/lama/*.pt
 model/sd15/               # Diffusers 目录或 .safetensors
 ```
 
-扁图默认走 cascade（AniSeg → WDTagger 库存 → DINO 框 → SAM3/SAM2），不假定姿态。Imagine 已分块只做可用性检查，不合格才补切。本机需要 GPU 才能跑检测 / SAM / SD。检测不到 CUDA 会直接报错。小洞走 LaMa（失败则 OpenCV Telea），大洞走 SD1.5。`--dry-run` 仍是 identity。
+扁图默认走 cascade（anime-segmentation → WDTagger 库存 → DINO 框 → SAM3/SAM2），不假定姿态。Imagine 已分块只做可用性检查，不合格才补切。本机需要 GPU 才能跑检测 / SAM / SD。检测不到 CUDA 会直接报错。小洞走 LaMa（失败则 OpenCV Telea），大洞走 SD1.5。`--dry-run` 仍是 identity。
 
 ## Imagine 分块（实际导出）
 

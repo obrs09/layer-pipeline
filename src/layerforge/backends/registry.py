@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from layerforge.backends.detect.aniseg import AniSegCut
+from layerforge.backends.detect.anime_segmentation import AniSegCut, AnimeSegmentationCut
 from layerforge.backends.detect.grounding_dino import GroundingDinoBoxes
 from layerforge.backends.detect.wdtagger import WdTagger
 from layerforge.backends.inpaint.router import RoutedInpaint
@@ -43,23 +43,27 @@ def build_segment(name: str, cfg: dict, kind: str, dry_run: bool):
 
 def _build_cascade(cfg: dict, dry_run: bool) -> CascadeSegment:
     taxonomy = load_taxonomy()
-    if dry_run:
-        return CascadeSegment(
-            cfg,
-            taxonomy,
-            character=AniSegCut(cfg, allow_luma=True),
-            dry_run=True,
-        )
     return CascadeSegment(
         cfg,
         taxonomy,
-        character=AniSegCut(cfg, allow_luma=False),
-        tagger=WdTagger(cfg),
-        boxes=GroundingDinoBoxes(cfg),
-        sam3=Sam3TextMasker(cfg),
-        sam2=SamHintedSegment(cfg),
-        dry_run=False,
+        character=_build_character(cfg, allow_luma=dry_run),
+        tagger=None if dry_run else WdTagger(cfg),
+        boxes=None if dry_run else GroundingDinoBoxes(cfg),
+        sam3=None if dry_run else Sam3TextMasker(cfg),
+        sam2=None if dry_run else SamHintedSegment(cfg),
+        dry_run=dry_run,
     )
+
+
+def _build_character(cfg: dict, *, allow_luma: bool):
+    name = (cfg.get("cascade") or {}).get("character", "anime_segmentation")
+    mapping = {
+        "anime_segmentation": lambda: AnimeSegmentationCut(cfg, allow_luma=allow_luma),
+        "aniseg": lambda: AniSegCut(cfg, allow_luma=allow_luma),
+    }
+    if name not in mapping:
+        raise ValueError(f"unknown character backend: {name}")
+    return mapping[name]()
 
 
 def build_inpaint(name: str, cfg: dict, dry_run: bool):

@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 角色切换成 anime-segmentation 官方预处理
+
+- 做了：`cascade.character` 改为 `anime_segmentation`。预处理对齐 SkyTNT `inference.get_mask`（RGB/255、等比缩放、居中 pad 1024，再 crop 回原图）。权重仍用已有 `model/aniseg/isnetis.onnx`，不重下。registry 按 YAML 建 CharacterCut，`aniseg` 作别名。本机重跑雪景图。**没改 schema、没改 .venv、没装 PyTorch ckpt**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag/grok-image-64010c19-6759-4ab7-92fa-b0bede4bb0d7.jpg --out runs --segment cascade --inpaint auto --job-id sam_64010c19`
+- 产物路径：`runs/sam_64010c19`（schema v2；layers: body/clothes/eye_l/eye_r；`missing: [face, hair_back]`）。角色剪影把树林/极光背景去掉了；衣服层是外套本身
+- 未做 / 已知缺陷：没有换成官方 CLI 默认的 `isnet_is.ckpt`（仍是同一份 isnetis ONNX）。`hair_front` 进了库存但没成层，头发仍在 body。斗篷边缘还有雪景光晕。face 仍 missing。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — body 打洞不再留黑缝
 
 - 做了：`_body_from_residual` 只按 hair/clothes/face 的真实 mask 扣，不再 `expand_px` 膨胀打洞。refine 后把距已有非 overlay 层 ≤ `seam_fill_px`（默认 24）的未认领前景缝归最近层。修 `sam_flat3` stack 发/颈/领口黑洞。**没改 schema、没改 .venv、没顺手修 eye_r / hair_back**

@@ -8,13 +8,14 @@ segment:
 
 cascade:
   max_attempts: 4
-  character: aniseg
+  character: anime_segmentation
   tagger: wdtagger
   boxes: grounding_dino
   mask: sam3.text
   mask_fallback: sam2.hinted
   dino_threshold: 0.25
   tag_threshold: 0.35
+  character_size: 1024
 
 inpaint:
   name: auto
@@ -31,6 +32,7 @@ paths:
   sam2_dir: model/sam2
   sam3_dir: model/sam3
   aniseg_dir: model/aniseg
+  anime_segmentation_dir: model/aniseg
   wdtagger_dir: model/wdtagger
   dino_dir: model/grounding_dino
   lama_dir: model/lama

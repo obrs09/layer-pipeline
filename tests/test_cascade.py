@@ -8,7 +8,7 @@ from layerforge.taxonomy import load_taxonomy
 
 
 class _Cut:
-    name = "aniseg"
+    name = "anime_segmentation"
 
     def cut(self, image):
         return np.full(image.shape[:2], 255, dtype=np.uint8)

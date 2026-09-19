@@ -1,7 +1,8 @@
 name: cascade
 protocol: SegmentBackend
-# Order is sequential. Do not run AniSeg / Tagger / DINO / SAM in parallel.
-character: aniseg
+# Order is sequential. Do not run character cut / Tagger / DINO / SAM in parallel.
+character: anime_segmentation
+character_size: 1024
 tagger: wdtagger
 boxes: grounding_dino
 mask: sam3.text
