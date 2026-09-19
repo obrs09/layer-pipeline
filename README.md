@@ -7,8 +7,9 @@
 - 策划书：`docs/PROJECT_PLAN.md`
 - 双 Agent：`AGENTS.md`
 - 每次交付：`CHANGE.md`
-- 推荐 Skill：`docs/SKILLS.md`（仓库副本在 `skills/`，Cursor project skills 在 `.cursor/skills/`）
 - GitHub：https://github.com/obrs09/layer-pipeline.git
+
+Cursor 规则和 Skill 只留本机（`.cursor/`、`skills/`，不进 git）。清单见 `docs/SKILLS.md`。
 
 ## 跑
 

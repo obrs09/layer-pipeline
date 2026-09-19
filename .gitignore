@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 
+# Cursor / Agent 草稿，不是产品
+.cursor/
+skills/
+
 # outputs, local images, and local overrides
 runs/
 test_input/

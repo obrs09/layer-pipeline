@@ -2,7 +2,7 @@
 
 原则：Skill 只写「模型本来就不会稳定遵守」的流程、文件约定、命令。不要把通用 Python 知识写进 Skill。
 
-建议放在仓库 `skills/`，Cursor 里加到 project skills；Grok 侧可用 skill-creator 同步一份。
+建议放在本机 `skills/` 或 Cursor project skills（`.cursor/skills/`），**不要进 git**。Grok 侧可用 skill-creator 同步一份。
 
 ## 现在就该有（v0）
 
