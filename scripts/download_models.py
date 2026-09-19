@@ -11,6 +11,7 @@ SD15_DIR = ROOT / "model" / "sd15"
 ANISEG_DIR = ROOT / "model" / "aniseg"
 WD_DIR = ROOT / "model" / "wdtagger"
 DINO_DIR = ROOT / "model" / "grounding_dino"
+SAM3_DIR = ROOT / "model" / "sam3"
 
 SAM2_URL = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
 SAM2_NAME = "sam2.1_hiera_large.pt"
@@ -21,6 +22,8 @@ ANISEG_REPO = "skytnt/anime-seg"
 ANISEG_FILE = "isnetis.onnx"
 WD_REPO = "SmilingWolf/wd-swinv2-tagger-v3"
 DINO_REPO = "IDEA-Research/grounding-dino-tiny"
+SAM3_REPO = "facebook/sam3"
+SAM3_FILES = ("sam3.pt", "config.json")
 
 
 def _download_url(url: str, dest: Path) -> None:
@@ -60,14 +63,7 @@ def _hf_snapshot(repo: str, dest_dir: Path) -> None:
     )
 
 
-def main() -> int:
-    print("SAM2…")
-    try:
-        _download_url(SAM2_URL, SAM2_DIR / SAM2_NAME)
-    except Exception as exc:
-        print(f"direct SAM2 failed ({exc}); trying Hugging Face")
-        _hf_file("facebook/sam2.1-hiera-large", SAM2_NAME, SAM2_DIR)
-
+def _download_detect() -> None:
     print("AniSeg…")
     _hf_file(ANISEG_REPO, ANISEG_FILE, ANISEG_DIR)
 
@@ -78,17 +74,48 @@ def main() -> int:
     print("Grounding DINO…")
     _hf_snapshot(DINO_REPO, DINO_DIR)
 
-    print("LaMa…")
+    print("SAM3…")
     try:
-        _hf_file(LAMA_REPO, LAMA_FILE, LAMA_DIR)
+        for name in SAM3_FILES:
+            _hf_file(SAM3_REPO, name, SAM3_DIR)
     except Exception as exc:
-        print(f"{LAMA_REPO} failed ({exc}); trying fashn-ai/LaMa")
-        _hf_file("fashn-ai/LaMa", LAMA_FILE, LAMA_DIR)
+        print(
+            f"SAM3 download failed ({exc}). "
+            "Request access at https://huggingface.co/facebook/sam3 then `hf auth login`."
+        )
 
-    print("SD1.5 inpaint…")
-    _hf_snapshot(SD15_REPO, SD15_DIR)
+
+def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--only-detect",
+        action="store_true",
+        help="AniSeg / WDTagger / DINO / SAM3 only (skip SAM2, LaMa, SD1.5)",
+    )
+    args = parser.parse_args()
+
+    if not args.only_detect:
+        print("SAM2…")
+        try:
+            _download_url(SAM2_URL, SAM2_DIR / SAM2_NAME)
+        except Exception as exc:
+            print(f"direct SAM2 failed ({exc}); trying Hugging Face")
+            _hf_file("facebook/sam2.1-hiera-large", SAM2_NAME, SAM2_DIR)
+
+        print("LaMa…")
+        try:
+            _hf_file(LAMA_REPO, LAMA_FILE, LAMA_DIR)
+        except Exception as exc:
+            print(f"{LAMA_REPO} failed ({exc}); trying fashn-ai/LaMa")
+            _hf_file("fashn-ai/LaMa", LAMA_FILE, LAMA_DIR)
+
+        print("SD1.5 inpaint…")
+        _hf_snapshot(SD15_REPO, SD15_DIR)
+
+    _download_detect()
     print("done")
-    print("SAM3 is optional: put a checkpoint in model/sam3/ if you have it.")
     return 0
 
 

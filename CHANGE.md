@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — 下载 cascade 检测权重
+
+- 做了：`scripts/download_models.py --only-detect` 增加 SAM3 尝试；本机已写入 AniSeg / WDTagger / Grounding DINO。**没改切件算法、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe scripts/download_models.py --only-detect`
+- 产物路径：`model/aniseg/isnetis.onnx`、`model/wdtagger/model.onnx`、`model/grounding_dino/model.safetensors`（不进 git）
+- 未做 / 已知缺陷：`facebook/sam3` 是门控仓库，当前 HF 账号 403，`model/sam3/` 仍空。去 https://huggingface.co/facebook/sam3 申请后重跑同一命令。没有 SAM3 时 cascade 会跳过文本步、走 SAM2
+
 ## 2026-09-18 — 检测级联切件（不假定姿态）
 
 - 做了：扁图默认 `cascade`：AniSeg 抠角色 → WDTagger 对照 taxonomy 做库存 → 只对库存件 Grounding DINO 出框 → SAM3 文本或 SAM2 框+正负点出 mask；每件可用性打分，不合格换 query/后端，最多 4 次，失败写入 `manifest.missing` / `needs_click`。taxonomy 增加 queries / required / required_if_tags / skip_if_tags / cut_priority。mutex 按优先级（eye > face > hair_front > hair_back）。Imagine 跳过 1–4，只检查可用性并补切缺件。去掉姿态 `region_prompts`。**没改 .venv、没实现 future/ 视觉对齐**
