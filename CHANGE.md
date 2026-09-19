@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 旁路更好时改用 ToonOut∩MODNet
+
+- 做了：第一步仍先跑 isnet（可换 seed 三次）。若 ToonOut/MODNet 彼此更一致、或 isnet 明显多包了一块（旁路几乎是 isnet 的子集且多出来 ≥10%），角色 mask 改用两个旁路的交集；交集太小则取结构更好的那个。原 isnet 落到 `01_character/isnet.png`。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/01_character/`。296a4352 / 9083053e `chosen_source=peer_and`，不再 FLAG（桌子/床从角色 mask 里拿掉了）。4034 / 458 / 640 / a163 仍用 isnet。908 `missing=[]`。296 仍 `missing=[eye_l,eye_r]`
+- 未做 / 已知缺陷：旁路权重仍是 ToonOut + Xenova/modnet，不是官方 Anime-MODNet。640 头发 missing。前景遮挡没做。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 第一步 anime-segmentation QA + 换 seed 重试
 
 - 做了：isnet 出 mask 后做三项校验——连通域（最大块 <60% 或滤掉 <50px 后 N>15）、灰区 0.15–0.85 占比 >25% / 腐蚀 15px 内部高熵 >5%、旁路 ToonOut + MODNet Dice <0.85。不过就换 seed 再抠（ONNX 无随机，seed 只换阈值和输入噪声），最多 3 次；第三次仍失败写 `steps/01_character/FLAGGED.json`、橙色 overlay、`logs/character_qa.json`，`needs_click` 记 `character`。**没改 schema、没改 .venv、没用骨架裁 isnet**。权重：`scripts/download_models.py --only-character-qa`

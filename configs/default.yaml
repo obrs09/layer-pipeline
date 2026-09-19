@@ -32,6 +32,12 @@ character_qa:
   entropy_high: 0.5
   max_interior_entropy_frac: 0.05
   min_dice: 0.85
+  prefer_peers: true
+  min_peer_agree: 0.85
+  peer_better_margin: 0.02
+  overinclude_contain: 0.90
+  overinclude_extra: 0.10
+  min_keep_of_isnet: 0.50
   peers:
     - toonout
     - modnet

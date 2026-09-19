@@ -125,6 +125,145 @@ def evaluate_character_qa(
     return CharacterQA(ok=not reasons, reasons=reasons, metrics=_json_safe(metrics))
 
 
+def containment(inner: np.ndarray, outer: np.ndarray) -> float:
+    a = inner > 0
+    b = outer > 0
+    denom = int(a.sum())
+    if denom == 0:
+        return 0.0
+    return float(np.logical_and(a, b).sum() / denom)
+
+
+def extra_frac(outer: np.ndarray, inner: np.ndarray) -> float:
+    b = outer > 0
+    denom = int(b.sum())
+    if denom == 0:
+        return 0.0
+    return float(np.logical_and(b, inner <= 0).sum() / denom)
+
+
+def structural_score(mask: np.ndarray, cfg: dict | None = None) -> float:
+    report = evaluate_character_qa(mask, None, {}, cfg)
+    if not report.ok or int(report.metrics.get("fg_px") or 0) < 64:
+        return -1.0
+    n_kept = int(report.metrics.get("n_kept") or 0)
+    largest = float(report.metrics.get("largest_frac") or 0.0)
+    return largest - 0.01 * max(0, n_kept - 2)
+
+
+def choose_peer_character(
+    isnet: np.ndarray,
+    peers: dict[str, np.ndarray | None],
+    cfg: dict | None = None,
+) -> dict | None:
+    """If ToonOut/MODNet agree more than isnet, return a replacement mask.
+
+    Two agreeing peers are AND-ed. Otherwise the structurally better peer
+    is used, as long as it still covers enough of the isnet silhouette.
+    """
+    cfg = cfg or {}
+    if not bool(cfg.get("prefer_peers", True)):
+        return None
+    min_dice = float(cfg.get("min_dice", 0.85))
+    min_agree = float(cfg.get("min_peer_agree", min_dice))
+    margin = float(cfg.get("peer_better_margin", 0.02))
+    contain_min = float(cfg.get("overinclude_contain", 0.90))
+    extra_min = float(cfg.get("overinclude_extra", 0.10))
+    keep_min = float(cfg.get("min_keep_of_isnet", 0.50))
+    isnet_fg = int((isnet > 0).sum())
+    if isnet_fg < 64:
+        return None
+
+    available = {
+        name: ((mask > 0).astype(np.uint8) * 255)
+        for name, mask in (peers or {}).items()
+        if mask is not None and int((mask > 0).sum()) >= 64
+    }
+    if not available:
+        return None
+
+    names = list(available)
+    isnet_dices = {name: float(dice_coef(isnet, mask)) for name, mask in available.items()}
+    contains = {name: containment(mask, isnet) for name, mask in available.items()}
+    extras = {name: extra_frac(isnet, mask) for name, mask in available.items()}
+    peer_dice = None
+    if len(available) >= 2:
+        peer_dice = float(dice_coef(available[names[0]], available[names[1]]))
+
+    max_isnet_dice = max(isnet_dices.values())
+    mean_extra = float(sum(extras.values()) / len(extras))
+    peers_agree = peer_dice is not None and peer_dice >= min_agree
+    peers_closer = peers_agree and peer_dice > max_isnet_dice + margin
+    isnet_outlier = peers_agree and max_isnet_dice < min_dice
+    overinclude = (
+        len(available) >= 1
+        and all(value >= contain_min for value in contains.values())
+        and mean_extra >= extra_min
+        and (peers_agree or len(available) == 1)
+    )
+    if not (peers_closer or isnet_outlier or overinclude):
+        return None
+
+    chosen = None
+    source = None
+    if peers_agree:
+        combo = np.logical_and(available[names[0]] > 0, available[names[1]] > 0)
+        combo_u8 = combo.astype(np.uint8) * 255
+        if (
+            int(combo.sum()) >= max(64, int(keep_min * isnet_fg))
+            and structural_score(combo_u8, cfg) >= 0
+        ):
+            chosen = combo_u8
+            source = "peer_and"
+    if chosen is None:
+        ranked = sorted(
+            available.items(),
+            key=lambda item: (structural_score(item[1], cfg), int((item[1] > 0).sum())),
+            reverse=True,
+        )
+        name, mask = ranked[0]
+        if structural_score(mask, cfg) < 0:
+            return None
+        if int((mask > 0).sum()) < max(64, int(keep_min * isnet_fg)):
+            return None
+        chosen = mask
+        source = name
+
+    others = {name: mask for name, mask in available.items() if name != source}
+    report = evaluate_character_qa(chosen, (chosen > 0).astype(np.float32), others, cfg)
+    if not report.ok and source == "peer_and":
+        # AND is allowed to fail peer-dice vs a looser peer; structural still required.
+        structural = evaluate_character_qa(chosen, None, {}, cfg)
+        if not structural.ok:
+            return None
+        report = structural
+
+    return {
+        "mask": chosen,
+        "source": source,
+        "reasons": [
+            key
+            for key, flag in (
+                ("peers_closer", peers_closer),
+                ("isnet_outlier", isnet_outlier),
+                ("overinclude", overinclude),
+            )
+            if flag
+        ],
+        "metrics": _json_safe(
+            {
+                "peer_dice": peer_dice,
+                "isnet_dice": isnet_dices,
+                "contain_in_isnet": contains,
+                "isnet_extra": extras,
+                "chosen_fg": int((chosen > 0).sum()),
+                "isnet_fg": isnet_fg,
+            }
+        ),
+        "qa": report.to_dict(),
+    }
+
+
 def _json_safe(value):
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}

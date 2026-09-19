@@ -5,7 +5,7 @@ from dataclasses import replace
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
-from layerforge.ops.character_qa import evaluate_character_qa
+from layerforge.ops.character_qa import choose_peer_character, evaluate_character_qa
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.usable import usable
@@ -64,6 +64,8 @@ class CascadeSegment:
         self.pose_person = None
         self.pose_boxes: dict[str, list[float]] = {}
         self.pose_points: dict[str, list[tuple[float, float]]] = {}
+        self._last_isnet_mask = None
+        self._last_peer_masks = {}
 
     def bind_dump(self, dump) -> None:
         self.dump = dump
@@ -80,6 +82,8 @@ class CascadeSegment:
         self.pose_person = None
         self.pose_boxes = {}
         self.pose_points = {}
+        self._last_isnet_mask = None
+        self._last_peer_masks = {}
         if hints.parts:
             return self._from_parts(image, hints.parts)
         return self._from_flat(image)
@@ -245,15 +249,30 @@ class CascadeSegment:
             flagged = True
         if last_mask is None or int((last_mask > 0).sum()) < 64:
             raise RuntimeError("anime-segmentation produced an empty character mask.")
+        source = "anime_segmentation"
+        peer_replace = None
+        isnet_mask = last_mask
+        choice = choose_peer_character(isnet_mask, peers, qa_cfg)
+        if choice is not None:
+            last_mask = choice["mask"]
+            last_prob = (last_mask > 0).astype(np.float32)
+            source = str(choice["source"])
+            peer_replace = {key: value for key, value in choice.items() if key != "mask"}
+            flagged = not bool((choice.get("qa") or {}).get("ok", True))
+            if not flagged and "character" in self.needs_click:
+                self.needs_click.remove("character")
         self.character_mask = last_mask
         self.character_qa = {
             "flagged": flagged,
             "chosen_seed": attempts[-1]["seed"] if attempts else 0,
+            "chosen_source": source,
             "attempts": attempts,
+            "peer_replace": peer_replace,
         }
         if flagged and "character" not in self.needs_click:
             self.needs_click.append("character")
         self._last_character_prob = last_prob
+        self._last_isnet_mask = isnet_mask
         self._last_peer_masks = peers
         return last_mask
 
@@ -614,6 +633,11 @@ class CascadeSegment:
             return
         flagged = bool((self.character_qa or {}).get("flagged"))
         self.dump.write_character(image, mask, flagged=flagged)
+        isnet_mask = getattr(self, "_last_isnet_mask", None)
+        source = (self.character_qa or {}).get("chosen_source") or "anime_segmentation"
+        if isnet_mask is not None and source != "anime_segmentation":
+            self.dump.write_character_raw(image, isnet_mask)
+            self.dump.write_png("01_character/isnet.png", isnet_mask)
         if self.character_qa is not None:
             self.dump.write_json("01_character/qa.json", self.character_qa)
         if flagged:

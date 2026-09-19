@@ -7,6 +7,7 @@ import numpy as np
 from layerforge.backends.detect.anime_segmentation import _seed_variant
 from layerforge.backends.segment.cascade import CascadeSegment
 from layerforge.ops.character_qa import (
+    choose_peer_character,
     connected_component_metrics,
     dice_coef,
     evaluate_character_qa,
@@ -188,6 +189,61 @@ def test_peer_dice_triggers_retry():
     assert cascade.character_qa["flagged"] is True
     last = cascade.character_qa["attempts"][-1]
     assert any(item.startswith("dice_toonout=") for item in last["reasons"])
+
+
+class _NamedPeer(_Peer):
+    def __init__(self, name, mask):
+        self.name = name
+        self.mask = mask
+
+
+def test_choose_peer_and_when_isnet_includes_furniture():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[50:78, 48:78] = 255
+    toon = body.copy()
+    mod = body.copy()
+    mod[9:12, 12:16] = 0
+    choice = choose_peer_character(isnet, {"toonout": toon, "modnet": mod}, {})
+    assert choice is not None
+    assert choice["source"] == "peer_and"
+    assert int(choice["mask"][60, 60]) == 0
+    assert int(choice["mask"][30, 30]) == 255
+
+
+def test_choose_peer_keeps_isnet_when_all_agree():
+    body = _blob_mask(80, 80)
+    choice = choose_peer_character(body, {"toonout": body, "modnet": body}, {})
+    assert choice is None
+
+
+def test_choose_peer_ignores_tiny_disagreement():
+    body = _blob_mask(80, 80)
+    junk = np.zeros_like(body)
+    junk[40:78, 40:78] = 255
+    choice = choose_peer_character(body, {"toonout": junk}, {})
+    assert choice is None
+
+
+def test_cascade_replaces_isnet_with_peer_and():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[50:78, 48:78] = 255
+    cut = _RetryCut({0: isnet, 1: isnet, 2: isnet})
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=cut,
+        character_peers=[_NamedPeer("toonout", body), _NamedPeer("modnet", body)],
+        dry_run=True,
+    )
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    mask = cascade._cut_character(image)
+    assert cascade.character_qa["chosen_source"] == "peer_and"
+    assert cascade.character_qa["flagged"] is False
+    assert "character" not in cascade.needs_click
+    assert int(mask[60, 60]) == 0
+    assert int(mask[30, 30]) == 255
 
 
 def test_cut_character_records_qa_without_flag():
