@@ -12,6 +12,8 @@ def refine_masks(
     taxonomy: Taxonomy,
     min_area: int = 64,
     mutex: bool = True,
+    overlay_iou: float = 0.5,
+    overlay_contain: float = 0.75,
 ) -> list[LayerMask]:
     kept: list[LayerMask] = []
     for layer in layers:
@@ -40,7 +42,7 @@ def refine_masks(
             rgba[~visible, 3] = 0
             layer.rgba = rgba
     out = [layer for layer in non_overlay if int((layer.visible > 0).sum()) >= min_area]
-    out.extend(overlay)
+    out.extend(_dedupe_overlay(overlay, overlay_iou, overlay_contain))
     return sorted(out, key=lambda m: (taxonomy.spec(m.role).order, -int((m.visible > 0).sum())))
 
 
@@ -61,6 +63,61 @@ def _drop_small_same_role(layers: list[LayerMask], taxonomy: Taxonomy) -> list[L
             if int((extra.visible > 0).sum()) < 0.25 * largest:
                 drop.add(id(extra))
     return [layer for layer in layers if id(layer) not in drop]
+
+
+def _mask_iou(a: np.ndarray, b: np.ndarray) -> float:
+    aa = a > 0
+    bb = b > 0
+    inter = int(np.logical_and(aa, bb).sum())
+    if inter == 0:
+        return 0.0
+    union = int(np.logical_or(aa, bb).sum())
+    return inter / union
+
+
+def _containment(a: np.ndarray, b: np.ndarray) -> float:
+    """Fraction of the smaller mask that sits inside the other."""
+    aa = a > 0
+    bb = b > 0
+    inter = int(np.logical_and(aa, bb).sum())
+    if inter == 0:
+        return 0.0
+    smaller = min(int(aa.sum()), int(bb.sum()))
+    return inter / smaller
+
+
+def _dedupe_overlay(
+    layers: list[LayerMask],
+    iou_thresh: float,
+    contain_thresh: float = 0.75,
+) -> list[LayerMask]:
+    """Keep one overlay sprite per role when Imagine crops land on the same pixels."""
+    if (iou_thresh <= 0 and contain_thresh <= 0) or len(layers) < 2:
+        return layers
+    by_role: dict[str, list[LayerMask]] = {}
+    for layer in layers:
+        by_role.setdefault(layer.role, []).append(layer)
+    kept: list[LayerMask] = []
+    for items in by_role.values():
+        items = sorted(
+            items,
+            key=lambda m: (int((m.visible > 0).sum()), m.score),
+            reverse=True,
+        )
+        chosen: list[LayerMask] = []
+        for cand in items:
+            duplicate = False
+            for prev in chosen:
+                if _mask_iou(cand.visible, prev.visible) >= iou_thresh:
+                    duplicate = True
+                    break
+                if contain_thresh > 0 and _containment(cand.visible, prev.visible) >= contain_thresh:
+                    duplicate = True
+                    break
+            if not duplicate:
+                chosen.append(cand)
+        kept.extend(chosen)
+    return kept
 
 
 def assign_residual_to_body(

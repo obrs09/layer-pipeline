@@ -108,3 +108,23 @@ def test_export_clears_stale_layer_files(tmp_path: Path):
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     expected = {Path(layer["file"]).name for layer in manifest["layers"]}
     assert names == expected
+
+
+def test_export_resets_run_log(tmp_path: Path):
+    job = _make_imagine_job(tmp_path)
+    log_path = tmp_path / "runs" / "dry" / "logs" / "run.jsonl"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text('{"event":"old-run"}\n', encoding="utf-8")
+    out = run_pipeline(
+        job,
+        tmp_path / "runs",
+        load_config(),
+        job_id="dry",
+        dry_run=True,
+        segment_name="noop_from_parts",
+        inpaint_name="identity",
+    )
+    text = (out / "logs" / "run.jsonl").read_text(encoding="utf-8")
+    assert "old-run" not in text
+    assert '"event": "start"' in text
+    assert text.count('"event": "start"') == 1

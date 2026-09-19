@@ -27,6 +27,8 @@ export:
 refine:
   min_area: 64
   mutex: true
+  overlay_iou: 0.5
+  overlay_contain: 0.75
 
 occlusion:
   background_luma: 250

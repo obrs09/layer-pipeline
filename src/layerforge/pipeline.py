@@ -73,6 +73,8 @@ def run_pipeline(
         taxonomy,
         min_area=int(refine_cfg.get("min_area", 64)),
         mutex=bool(refine_cfg.get("mutex", True)),
+        overlay_iou=float(refine_cfg.get("overlay_iou", 0.5)),
+        overlay_contain=float(refine_cfg.get("overlay_contain", 0.75)),
     )
     masks = assign_residual_to_body(
         masks,
