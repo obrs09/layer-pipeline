@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 落盘每步预览，扁图跑到 runs/flat
+
+- 做了：每步写到 `steps/`（01 角色抠图、02 tags、03 DINO 框、04 SAM 切件、05 refine、06 occlusion、07 inpaint 洞）。契约仍是 `layers/` `masks/` `preview/` `manifest.json`，没改 schema。`--input` 可以是扁图目录。job id 用 `grok-image-` 的 uuid 前 8 位。本机重跑 `test_input/image_no_sag` 全部 6 张单图。**没改切件算法、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/`（本机 6 张单图），先看 `steps/01_character/rgba.png` 和 `steps/04_segment/`
+- 未做 / 已知缺陷：夜景 seam fill 外圈还在（这次只落盘，没修）。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 角色切换成 anime-segmentation 官方预处理
 
 - 做了：`cascade.character` 改为 `anime_segmentation`。预处理对齐 SkyTNT `inference.get_mask`（RGB/255、等比缩放、居中 pad 1024，再 crop 回原图）。权重仍用已有 `model/aniseg/isnetis.onnx`，不重下。registry 按 YAML 建 CharacterCut，`aniseg` 作别名。本机重跑雪景图。**没改 schema、没改 .venv、没装 PyTorch ckpt**

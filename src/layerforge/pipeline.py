@@ -18,6 +18,7 @@ from layerforge.ops.normalize import resize_max_side, to_rgba
 from layerforge.ops.occlusion import plan_occlusion
 from layerforge.ops.refine import assign_residual_to_body, assign_unclaimed_seams, refine_masks
 from layerforge.ops.reproject import reproject
+from layerforge.ops.trace import StepDump
 from layerforge.taxonomy import Taxonomy, load_taxonomy
 
 
@@ -54,9 +55,11 @@ def run_pipeline(
         # Parts were placed on original size; skip resize if we already placed.
         source = to_rgba(ingested.source_rgba)
 
-    job_id = job_id or _default_job_id(input_path)
+    job_id = job_id or short_job_id(input_path)
     out_dir = out_root / job_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    dump = StepDump(out_dir, enabled=bool((cfg.get("export") or {}).get("steps", True)))
+    dump.reset()
     log = RunLog(out_dir / "logs" / "run.jsonl")
     log.write("start", input=str(input_path), kind=ingested.kind, dry_run=dry_run)
 
@@ -64,11 +67,14 @@ def run_pipeline(
     inp_name = inpaint_name or (cfg.get("inpaint") or {}).get("name", "identity")
     segment = build_segment(seg_name, cfg, ingested.kind, dry_run)
     inpaint = build_inpaint(inp_name, cfg, dry_run)
+    if hasattr(segment, "bind_dump"):
+        segment.bind_dump(dump)
     log.write("backends", segment=segment.name, inpaint=inpaint.name)
 
     masks = segment.segment(source, ingested.hints)
     tags = getattr(segment, "tags", None) or {}
     if tags:
+        write_tags_json(out_dir / "steps" / "02_tags.json", tags)
         write_tags_json(out_dir / "logs" / "tags.json", tags)
         top = sorted(tags.items(), key=lambda item: (-float(item[1]), item[0]))[:16]
         log.write(
@@ -84,6 +90,7 @@ def run_pipeline(
     )
     masks = assign_roles(masks, source, taxonomy)
     log.write("roles", roles=[m.role for m in masks])
+    dump.write_layers("04_segment", source, masks, _layer_ids(masks, taxonomy))
     refine_cfg = cfg.get("refine") or {}
     masks = refine_masks(
         masks,
@@ -108,6 +115,8 @@ def run_pipeline(
         max_dist=float(refine_cfg.get("seam_fill_px", 24)),
     )
     log.write("refine", count=len(masks))
+    ids = _layer_ids(masks, taxonomy)
+    dump.write_layers("05_refine", source, masks, ids)
     occ_map = plan_occlusion(
         masks,
         source,
@@ -115,8 +124,8 @@ def run_pipeline(
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
         seam_dilate_px=int((cfg.get("inpaint") or {}).get("seam_dilate_px", 2)),
     )
+    dump.write_layers("06_occlusion", source, masks, ids, occluded=occ_map)
 
-    ids = _layer_ids(masks, taxonomy)
     layers_rgba: dict[str, np.ndarray] = {}
     masks_visible: dict[str, np.ndarray] = {}
     masks_occluded: dict[str, np.ndarray] = {}
@@ -144,6 +153,7 @@ def run_pipeline(
             engine = getattr(inpaint, "last_engine", inpaint.name)
             if engine and engine not in {"skip", "identity"}:
                 layer.notes = f"{layer.notes}; inpaint={engine}".strip("; ")
+            dump.write_inpaint_hole(layer_id, filled, occluded)
         layer_rgba = reproject(filled, source, visible, occ_for_fill)
         layers_rgba[layer_id] = layer_rgba
         masks_visible[layer_id] = visible
@@ -205,8 +215,13 @@ def run_pipeline(
     return out_dir
 
 
-def _default_job_id(input_path: Path) -> str:
-    from datetime import datetime
-
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"{stamp}_{input_path.stem}"
+def short_job_id(input_path: str | Path) -> str:
+    path = Path(input_path)
+    if path.is_dir():
+        return path.name
+    stem = path.stem
+    if stem.startswith("grok-image-"):
+        parts = stem.split("-")
+        if len(parts) >= 3 and parts[2]:
+            return parts[2]
+    return stem

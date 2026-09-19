@@ -51,6 +51,24 @@ model/sd15/               # Diffusers 目录或 .safetensors
 
 扁图默认走 cascade（anime-segmentation → WDTagger 库存 → DINO 框 → SAM3/SAM2），不假定姿态。Imagine 已分块只做可用性检查，不合格才补切。本机需要 GPU 才能跑检测 / SAM / SD。检测不到 CUDA 会直接报错。小洞走 LaMa（失败则 OpenCV Telea），大洞走 SD1.5。`--dry-run` 仍是 identity。
 
+跑一批扁图：
+
+```text
+.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto
+```
+
+每张输出 `runs/flat/<uuid8>/`。契约仍是 `layers/` `masks/` `preview/` `manifest.json`。中间步在 `steps/`：
+
+```text
+steps/01_character/   # anime-segmentation 整角色
+steps/02_tags.json
+steps/03_boxes/       # DINO 框
+steps/04_segment/     # SAM 切件（refine 前，含 body 残差）
+steps/05_refine/      # mutex / seam fill 后
+steps/06_occlusion/
+steps/07_inpaint/     # 只在 occluded 洞里
+```
+
 ## Imagine 分块（实际导出）
 
 Grok Imagine 并不是策划书里的 `source.png + parts/part_00.png`。当前 `test_input` 是：

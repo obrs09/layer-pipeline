@@ -47,18 +47,25 @@ class CascadeSegment:
         self.needs_click: list[str] = []
         self.inventory: list[str] = []
         self.tags: dict[str, float] = {}
+        self.dump = None
+        self.debug_boxes: list[dict] = []
+
+    def bind_dump(self, dump) -> None:
+        self.dump = dump
 
     def segment(self, image: np.ndarray, hints: SegmentHints) -> list[LayerMask]:
         self.missing = []
         self.needs_click = []
         self.inventory = []
         self.tags = {}
+        self.debug_boxes = []
         if hints.parts:
             return self._from_parts(image, hints.parts)
         return self._from_flat(image)
 
     def _from_flat(self, image: np.ndarray) -> list[LayerMask]:
         character = self._cut_character(image)
+        self._dump_character(image, character)
         tags = self._tag(image)
         self.tags = dict(tags)
         inventory = build_inventory(tags, self.taxonomy, self.tag_threshold)
@@ -114,6 +121,7 @@ class CascadeSegment:
         for spec in self.taxonomy.roles.values():
             if spec.required and spec.name not in {layer.role for layer in kept}:
                 self._mark_missing(spec.name)
+        self._dump_boxes(image)
         return kept
 
     def _from_parts(self, image: np.ndarray, parts: list[LayerMask]) -> list[LayerMask]:
@@ -122,6 +130,7 @@ class CascadeSegment:
             character = np.maximum(character, (part.visible > 0).astype(np.uint8) * 255)
         if int((character > 0).sum()) < 32:
             character[:] = 255
+        self._dump_character(image, character)
         recut = not self.dry_run and self.sam2 is not None
         self.inventory = [part.role for part in parts]
         if recut:
@@ -157,6 +166,7 @@ class CascadeSegment:
                         kept.append(layer)
                         continue
                 self._mark_missing(role)
+        self._dump_boxes(image)
         return kept
 
     def _cut_character(self, image: np.ndarray) -> np.ndarray:
@@ -219,6 +229,7 @@ class CascadeSegment:
                 last_reasons.append(f"no_box:{query}")
                 continue
             box = _pick_box(detections, character, role)
+            self._trace_box(role, query, box, detections)
             pos = [_box_center(box)]
             neg = _neighbor_negatives(others, spec.exclude_roles)
             mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
@@ -327,6 +338,7 @@ class CascadeSegment:
         for role, box in assigned.items():
             if role not in inventory:
                 continue
+            self._trace_box(role, family, box, detections)
             spec = self.taxonomy.spec(role)
             pos = [_box_center(box)]
             neg = _neighbor_negatives(others + layers, spec.exclude_roles)
@@ -463,6 +475,33 @@ class CascadeSegment:
             self.missing.append(role)
         if role not in self.needs_click:
             self.needs_click.append(role)
+
+    def _dump_character(self, image: np.ndarray, mask: np.ndarray) -> None:
+        if self.dump is None:
+            return
+        self.dump.write_character(image, mask)
+
+    def _dump_boxes(self, image: np.ndarray) -> None:
+        if self.dump is None:
+            return
+        self.dump.write_boxes(image, self.debug_boxes)
+
+    def _trace_box(self, role: str, query: str, box: list[float], detections) -> None:
+        score = None
+        for item in detections or []:
+            if len(item) < 2:
+                continue
+            if item[1] == box:
+                score = float(item[2]) if len(item) > 2 else None
+                break
+        self.debug_boxes.append(
+            {
+                "role": role,
+                "query": query,
+                "xyxy": [round(float(v), 1) for v in box],
+                "score": None if score is None else round(float(score), 4),
+            }
+        )
 
 
 def _layer(role: str, mask: np.ndarray, score: float, notes: str) -> LayerMask:
