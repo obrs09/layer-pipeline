@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
+from layerforge.ops.character_qa import evaluate_character_qa
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.usable import usable
@@ -32,6 +33,7 @@ class CascadeSegment:
         sam3=None,
         sam2=None,
         pose=None,
+        character_peers=None,
         dry_run: bool = False,
     ) -> None:
         self.cfg = cfg
@@ -42,6 +44,7 @@ class CascadeSegment:
         self.sam3 = sam3
         self.sam2 = sam2
         self.pose = pose
+        self.character_peers = list(character_peers or [])
         self.dry_run = dry_run
         cascade_cfg = cfg.get("cascade") or {}
         self.max_attempts = int(cascade_cfg.get("max_attempts", 4))
@@ -57,6 +60,7 @@ class CascadeSegment:
         self.debug_boxes: list[dict] = []
         self.cut_failures: list[dict] = []
         self.character_mask = None
+        self.character_qa = None
         self.pose_person = None
         self.pose_boxes: dict[str, list[float]] = {}
         self.pose_points: dict[str, list[tuple[float, float]]] = {}
@@ -72,6 +76,7 @@ class CascadeSegment:
         self.debug_boxes = []
         self.cut_failures = []
         self.character_mask = None
+        self.character_qa = None
         self.pose_person = None
         self.pose_boxes = {}
         self.pose_points = {}
@@ -211,11 +216,55 @@ class CascadeSegment:
     def _cut_character(self, image: np.ndarray) -> np.ndarray:
         if self.character is None:
             raise RuntimeError("cascade needs a CharacterCut backend (anime-segmentation).")
-        mask = self.character.cut(image)
-        if int((mask > 0).sum()) < 64:
+        qa_cfg = self.cfg.get("character_qa") or {}
+        max_attempts = int(qa_cfg.get("max_attempts", 3))
+        attempts: list[dict] = []
+        last_mask = None
+        last_prob = None
+        peers = self._peer_masks(image)
+        flagged = False
+        for seed in range(max(1, max_attempts)):
+            if hasattr(self.character, "predict"):
+                mask, prob = self.character.predict(image, seed=seed)
+            else:
+                mask = self.character.cut(image)
+                prob = (mask > 0).astype(np.float32)
+            report = evaluate_character_qa(mask, prob, peers, qa_cfg)
+            attempts.append(
+                {
+                    "seed": seed,
+                    "ok": report.ok,
+                    "reasons": list(report.reasons),
+                    "metrics": report.metrics,
+                }
+            )
+            last_mask, last_prob = mask, prob
+            if report.ok:
+                flagged = False
+                break
+            flagged = True
+        if last_mask is None or int((last_mask > 0).sum()) < 64:
             raise RuntimeError("anime-segmentation produced an empty character mask.")
-        self.character_mask = mask
-        return mask
+        self.character_mask = last_mask
+        self.character_qa = {
+            "flagged": flagged,
+            "chosen_seed": attempts[-1]["seed"] if attempts else 0,
+            "attempts": attempts,
+        }
+        if flagged and "character" not in self.needs_click:
+            self.needs_click.append("character")
+        self._last_character_prob = last_prob
+        self._last_peer_masks = peers
+        return last_mask
+
+    def _peer_masks(self, image: np.ndarray) -> dict[str, np.ndarray | None]:
+        out: dict[str, np.ndarray | None] = {}
+        for peer in self.character_peers:
+            try:
+                out[peer.name] = peer.cut(image)
+            except Exception:
+                out[peer.name] = None
+        return out
 
     def _apply_pose_hints(self, image: np.ndarray) -> None:
         """Skeleton boxes/points for SAM. Does not change the isnet character mask."""
@@ -563,7 +612,17 @@ class CascadeSegment:
     def _dump_character(self, image: np.ndarray, mask: np.ndarray) -> None:
         if self.dump is None:
             return
-        self.dump.write_character(image, mask)
+        flagged = bool((self.character_qa or {}).get("flagged"))
+        self.dump.write_character(image, mask, flagged=flagged)
+        if self.character_qa is not None:
+            self.dump.write_json("01_character/qa.json", self.character_qa)
+        if flagged:
+            self.dump.write_json("01_character/FLAGGED.json", self.character_qa)
+        peers = getattr(self, "_last_peer_masks", None) or {}
+        for name, peer_mask in peers.items():
+            if peer_mask is None:
+                continue
+            self.dump.write_png(f"01_character/peer_{name}.png", peer_mask)
 
     def _dump_boxes(self, image: np.ndarray) -> None:
         if self.dump is None:

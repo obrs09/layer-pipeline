@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 第一步 anime-segmentation QA + 换 seed 重试
+
+- 做了：isnet 出 mask 后做三项校验——连通域（最大块 <60% 或滤掉 <50px 后 N>15）、灰区 0.15–0.85 占比 >25% / 腐蚀 15px 内部高熵 >5%、旁路 ToonOut + MODNet Dice <0.85。不过就换 seed 再抠（ONNX 无随机，seed 只换阈值和输入噪声），最多 3 次；第三次仍失败写 `steps/01_character/FLAGGED.json`、橙色 overlay、`logs/character_qa.json`，`needs_click` 记 `character`。**没改 schema、没改 .venv、没用骨架裁 isnet**。权重：`scripts/download_models.py --only-character-qa`
+- 怎么跑：`.\.venv\Scripts\python.exe scripts/download_models.py --only-character-qa` ；`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/01_character/qa.json`。9083053e 三次都失败并 FLAG（内部熵 + Dice 0.73/0.76，床被 toonout/modnet 抠掉而 isnet 连上）。458 / a163 seed0 过门 `missing=[]`。4034a197 `missing=[eye_r]`。64010c19 `missing=[hair_back,hair_front]`。296a4352 `missing=[eye_l,eye_r]`，Dice 刚过 0.85 **没 FLAG**（桌子连在身体上，是一块超大连通域）
+- 未做 / 已知缺陷：贴着角色的同色家具（296 书桌）这三项抓不到。SkyTNT Anime-MODNet 没有公开 ONNX，旁路用同结构 Xenova/modnet。isnet 无真随机 seed。前景遮挡没做。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 角色抠图只认 isnet，骨架不再覆盖
 
 - 做了：`01_character` 改回 anime-segmentation 原 mask，DWPose 只写 `01_pose/` 并给 SAM 部件框/正点，不再用骨架裁角色，也不再用 pose person 扣 body 残差。296a4352 那种头发/袖子被骨架切掉的问题来自这步，不是 isnet。**没改 schema、没改 .venv**

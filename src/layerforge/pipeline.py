@@ -82,11 +82,29 @@ def run_pipeline(
             count=len(tags),
             top=[{"tag": name, "score": round(float(score), 4)} for name, score in top],
         )
+    character_qa = getattr(segment, "character_qa", None)
+    if character_qa:
+        dump.write_json("01_character/qa.json", character_qa)
+        if character_qa.get("flagged"):
+            dump.write_json("01_character/FLAGGED.json", character_qa)
+        (out_dir / "logs").mkdir(parents=True, exist_ok=True)
+        (out_dir / "logs" / "character_qa.json").write_text(
+            json.dumps(character_qa, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        log.write(
+            "character_qa",
+            flagged=bool(character_qa.get("flagged")),
+            chosen_seed=character_qa.get("chosen_seed"),
+            attempts=len(character_qa.get("attempts") or []),
+            reasons=(character_qa.get("attempts") or [{}])[-1].get("reasons") or [],
+        )
     log.write(
         "segment",
         count=len(masks),
         inventory=list(getattr(segment, "inventory", []) or []),
         missing=list(getattr(segment, "missing", []) or []),
+        needs_click=list(getattr(segment, "needs_click", []) or []),
     )
     masks = assign_roles(masks, source, taxonomy)
     log.write("roles", roles=[m.role for m in masks])

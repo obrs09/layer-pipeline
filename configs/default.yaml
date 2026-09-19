@@ -20,6 +20,22 @@ cascade:
   tag_threshold: 0.35
   character_size: 1024
 
+character_qa:
+  max_attempts: 3
+  min_largest_frac: 0.60
+  max_components: 15
+  min_component_px: 50
+  gray_lo: 0.15
+  gray_hi: 0.85
+  max_gray_frac: 0.25
+  erode_px: 15
+  entropy_high: 0.5
+  max_interior_entropy_frac: 0.05
+  min_dice: 0.85
+  peers:
+    - toonout
+    - modnet
+
 inpaint:
   name: auto
   small_hole_backend: lama
@@ -37,6 +53,8 @@ paths:
   aniseg_dir: model/aniseg
   anime_segmentation_dir: model/aniseg
   dwpose_dir: model/dwpose
+  toonout_dir: model/toonout
+  modnet_dir: model/modnet
   wdtagger_dir: model/wdtagger
   dino_dir: model/grounding_dino
   lama_dir: model/lama

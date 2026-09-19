@@ -80,14 +80,15 @@ class StepDump:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    def write_character(self, image: np.ndarray, mask: np.ndarray) -> None:
+    def write_character(self, image: np.ndarray, mask: np.ndarray, *, flagged: bool = False) -> None:
         if not self.enabled:
             return
         self.write_png("01_character/mask.png", mask)
         self.write_png("01_character/rgba.png", masked_rgba(image, mask))
+        color = (255, 70, 40) if flagged else (0, 210, 255)
         self.write_png(
             "01_character/overlay.png",
-            tint_overlay(image, [(mask, (0, 210, 255))]),
+            tint_overlay(image, [(mask, color)]),
         )
 
     def write_character_raw(self, image: np.ndarray, mask: np.ndarray) -> None:

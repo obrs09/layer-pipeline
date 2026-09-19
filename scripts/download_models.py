@@ -27,6 +27,12 @@ SAM3_FILES = ("sam3.pt", "config.json")
 DWPOSE_DIR = ROOT / "model" / "dwpose"
 DWPOSE_REPO = "fashn-ai/DWPose"
 DWPOSE_FILES = ("yolox_l.onnx", "dw-ll_ucoco_384.onnx")
+TOONOUT_DIR = ROOT / "model" / "toonout"
+TOONOUT_REPO = "sprited/birefnet-toonout-onnx"
+TOONOUT_FILE = "birefnet-toonout-fp16.onnx"
+MODNET_DIR = ROOT / "model" / "modnet"
+MODNET_REPO = "Xenova/modnet"
+MODNET_FILE = "onnx/model.onnx"
 
 
 def _download_url(url: str, dest: Path) -> None:
@@ -66,6 +72,20 @@ def _hf_snapshot(repo: str, dest_dir: Path) -> None:
     )
 
 
+def _download_character_qa() -> None:
+    print("ToonOut (BiRefNet anime)…")
+    try:
+        _hf_file(TOONOUT_REPO, TOONOUT_FILE, TOONOUT_DIR)
+    except Exception as exc:
+        print(f"{TOONOUT_REPO}/{TOONOUT_FILE} failed ({exc}). Put birefnet-toonout-fp16.onnx in model/toonout/")
+
+    print("MODNet…")
+    try:
+        _hf_file(MODNET_REPO, MODNET_FILE, MODNET_DIR)
+    except Exception as exc:
+        print(f"{MODNET_REPO}/{MODNET_FILE} failed ({exc}). Put onnx/model.onnx in model/modnet/")
+
+
 def _download_detect() -> None:
     print("anime-segmentation (SkyTNT isnetis)…")
     _hf_file(ANISEG_REPO, ANISEG_FILE, ANISEG_DIR)
@@ -99,6 +119,8 @@ def _download_detect() -> None:
         except Exception as exc2:
             print(f"DWPose download failed ({exc2}). Put yolox_l.onnx and dw-ll_ucoco_384.onnx in model/dwpose/")
 
+    _download_character_qa()
+
 
 def main() -> int:
     import argparse
@@ -114,7 +136,17 @@ def main() -> int:
         action="store_true",
         help="YOLOX + DWPose ONNX only",
     )
+    parser.add_argument(
+        "--only-character-qa",
+        action="store_true",
+        help="ToonOut + MODNet ONNX peers for character QA",
+    )
     args = parser.parse_args()
+
+    if args.only_character_qa:
+        _download_character_qa()
+        print("done")
+        return 0
 
     if args.only_dwpose:
         print("DWPose…")

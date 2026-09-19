@@ -3,6 +3,8 @@ from __future__ import annotations
 from layerforge.backends.detect.anime_segmentation import AniSegCut, AnimeSegmentationCut
 from layerforge.backends.detect.dwpose import DwPoseEstimate
 from layerforge.backends.detect.grounding_dino import GroundingDinoBoxes
+from layerforge.backends.detect.modnet import ModnetCut
+from layerforge.backends.detect.toonout import ToonOutCut
 from layerforge.backends.detect.wdtagger import WdTagger
 from layerforge.backends.inpaint.router import RoutedInpaint
 from layerforge.backends.inpaint.identity import IdentityInpaint
@@ -53,6 +55,7 @@ def _build_cascade(cfg: dict, dry_run: bool) -> CascadeSegment:
         sam3=None if dry_run else Sam3TextMasker(cfg),
         sam2=None if dry_run else SamHintedSegment(cfg),
         pose=None if dry_run else _build_pose(cfg),
+        character_peers=[] if dry_run else _build_character_peers(cfg),
         dry_run=dry_run,
     )
 
@@ -66,6 +69,21 @@ def _build_character(cfg: dict, *, allow_luma: bool):
     if name not in mapping:
         raise ValueError(f"unknown character backend: {name}")
     return mapping[name]()
+
+
+def _build_character_peers(cfg: dict) -> list:
+    names = (cfg.get("character_qa") or {}).get("peers") or ["toonout", "modnet"]
+    mapping = {
+        "toonout": lambda: ToonOutCut(cfg),
+        "modnet": lambda: ModnetCut(cfg),
+        "anime_modnet": lambda: ModnetCut(cfg),
+    }
+    peers = []
+    for name in names:
+        if name not in mapping:
+            raise ValueError(f"unknown character QA peer: {name}")
+        peers.append(mapping[name]())
+    return peers
 
 
 def _build_pose(cfg: dict):
