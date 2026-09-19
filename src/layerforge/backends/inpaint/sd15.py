@@ -36,7 +36,11 @@ class Sd15AnimeInpaint:
         search = resolve_path(explicit or paths.get("sd15_dir", "model/sd15"))
         if not search.exists():
             raise RuntimeError(f"SD1.5 model path missing: {search}. Put weights in model/sd15/.")
-        has_weight = any(search.glob("*.safetensors")) or (search / "model_index.json").exists()
+        has_weight = (
+            any(search.glob("*.safetensors"))
+            or any(search.glob("*.ckpt"))
+            or (search / "model_index.json").exists()
+        )
         if not has_weight and search.is_dir() and not any(search.iterdir()):
             raise RuntimeError(f"model/sd15 is empty. Place a Diffusers folder or .safetensors there.")
         return search
@@ -60,14 +64,33 @@ class Sd15AnimeInpaint:
         self._steps = int(backend.get("steps", 28))
         self._guidance = float(backend.get("guidance", 7.0))
         kwargs = {"torch_dtype": torch.float16, "safety_checker": None}
-        if model.is_dir() and (model / "model_index.json").exists():
-            self._pipe = StableDiffusionInpaintPipeline.from_pretrained(str(model), **kwargs)
-        else:
-            weights = sorted(model.glob("*.safetensors"))
-            if not weights:
-                raise RuntimeError(f"No .safetensors in {model}")
-            self._pipe = StableDiffusionInpaintPipeline.from_single_file(str(weights[0]), **kwargs)
+        weights = (
+            sorted(model.glob("*inpainting*.safetensors"))
+            + sorted(model.glob("*inpainting*.ckpt"))
+            + sorted(model.glob("*.safetensors"))
+            + sorted(model.glob("*.ckpt"))
+        )
+        last_err = None
+        if weights:
+            try:
+                self._pipe = StableDiffusionInpaintPipeline.from_single_file(
+                    str(weights[0]), **kwargs
+                )
+            except Exception as exc:
+                last_err = exc
+                self._pipe = None
+        if self._pipe is None and model.is_dir() and (model / "model_index.json").exists():
+            try:
+                self._pipe = StableDiffusionInpaintPipeline.from_pretrained(str(model), **kwargs)
+            except Exception as exc:
+                last_err = exc
+                self._pipe = None
+        if self._pipe is None:
+            raise RuntimeError(
+                f"Could not load SD1.5 inpaint from {model}: {last_err}"
+            ) from last_err
         self._pipe = self._pipe.to("cuda")
+        self._pipe.enable_attention_slicing()
 
     def inpaint(self, image: np.ndarray, mask: np.ndarray, prompt: str) -> np.ndarray:
         self._load()

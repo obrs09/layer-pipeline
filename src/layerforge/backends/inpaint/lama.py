@@ -40,7 +40,16 @@ class LamaInpaint:
             from simple_lama_inpainting import SimpleLama
         except ImportError as exc:
             raise RuntimeError("LaMa extra is not installed (simple-lama-inpainting).") from exc
-        self._model = SimpleLama(device="cuda")
+        try:
+            import torch
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            device = "cpu"
+        try:
+            self._model = SimpleLama(model_path=str(ckpt), device=device)
+        except TypeError:
+            self._model = SimpleLama(device=device)
         self._ckpt = ckpt
 
     def inpaint(self, image: np.ndarray, mask: np.ndarray, prompt: str) -> np.ndarray:

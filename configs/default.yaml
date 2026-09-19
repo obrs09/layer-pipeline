@@ -7,10 +7,11 @@ segment:
   name: auto
 
 inpaint:
-  name: identity
+  name: auto
   small_hole_backend: lama
   small_hole_max_px: 4096
   seam_dilate_px: 2
+  crop_pad_px: 32
 
 compose:
   name: reproject_v1

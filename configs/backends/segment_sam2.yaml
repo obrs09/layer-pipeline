@@ -5,3 +5,8 @@ model_cfg: configs/sam2.1/sam2.1_hiera_l.yaml
 multimask: true
 pick: best_iou
 points_per_side: 24
+# Fractions of the foreground bbox. SAM gets one box prompt per role (pick-one, never average).
+region_prompts:
+  hair_back: {top: 0.0, bottom: 0.42, left: 0.04, right: 0.96}
+  face: {top: 0.06, bottom: 0.38, left: 0.28, right: 0.72}
+  clothes: {top: 0.30, bottom: 0.90, left: 0.10, right: 0.90}

@@ -27,7 +27,7 @@ python -m pytest
 python scripts/download_models.py
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 python -m pip install sam2 hydra-core iopath
-python -m layerforge run --input <flat.png> --out runs --segment sam2.hinted --inpaint identity
+python -m layerforge run --input <flat.png> --out runs --segment sam2.hinted --inpaint auto
 ```
 
 ## 模型路径
@@ -40,7 +40,7 @@ model/lama/*.pt
 model/sd15/          # Diffusers 目录或 .safetensors
 ```
 
-本机需要 GPU 才能跑 SAM2 / SD1.5。检测不到 CUDA 会直接报错，不会偷偷用 CPU 跑 SD。
+本机需要 GPU 才能跑 SAM2 / SD1.5。检测不到 CUDA 会直接报错，不会偷偷用 CPU 跑 SD。小洞走 LaMa（失败则 OpenCV Telea），大洞走 SD1.5。`--dry-run` 仍是 identity。
 
 ## Imagine 分块（实际导出）
 

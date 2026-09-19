@@ -13,6 +13,7 @@ from layerforge.contracts import SCHEMA, BackendInfo, Canvas, LayerRecord, Manif
 from layerforge.image_io import alpha_over, bbox_from_mask
 from layerforge.ingest import ingest_input
 from layerforge.logutil import RunLog
+from layerforge.ops.assign_roles import assign_roles
 from layerforge.ops.normalize import resize_max_side, to_rgba
 from layerforge.ops.occlusion import plan_occlusion
 from layerforge.ops.refine import assign_residual_to_body, refine_masks
@@ -67,6 +68,8 @@ def run_pipeline(
 
     masks = segment.segment(source, ingested.hints)
     log.write("segment", count=len(masks))
+    masks = assign_roles(masks, source, taxonomy)
+    log.write("roles", roles=[m.role for m in masks])
     refine_cfg = cfg.get("refine") or {}
     masks = refine_masks(
         masks,
@@ -121,6 +124,9 @@ def run_pipeline(
             prompt = prompt_tpl.format(role=layer.role)
             filled = inpaint.inpaint(source, occluded, prompt)
             complete = True
+            engine = getattr(inpaint, "last_engine", inpaint.name)
+            if engine and engine not in {"skip", "identity"}:
+                layer.notes = f"{layer.notes}; inpaint={engine}".strip("; ")
         layer_rgba = reproject(filled, source, visible, occ_for_fill)
         layers_rgba[layer_id] = layer_rgba
         masks_visible[layer_id] = visible

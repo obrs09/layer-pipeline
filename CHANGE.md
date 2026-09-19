@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-18 — 扁图 role + 真补绘
+
+- 做了：扁图 SAM 按 `segment_sam2.yaml` 的 `region_prompts` 切 `hair_back` / `face` / `clothes`（multimask 择一，不平均）；剩余 `unknown_*` 用几何+肤色启发式标 taxonomy role，标不出的归 `acc`。默认 `inpaint.name=auto`：洞面积 ≤ `small_hole_max_px` 走 LaMa（失败则 OpenCV Telea），更大走 SD1.5；只在 occluded 上补，可见区 reproject。SD 优先加载 `*inpainting*.ckpt`。补了 assign_roles / router / region box 测试。本机 `sam_flat1` 已跑通
+- 怎么跑：`python -m pytest && python -m layerforge run --input test_input/image_no_sag/grok-image-4034a197-286e-45f1-8049-60f91c89d8a8.jpg --out runs --segment sam2.hinted --inpaint auto --job-id sam_flat1`
+- 产物路径：`runs/sam_flat1`（`hair_back` `body` `clothes` `face` `acc_*`，无 `unknown_*`）；hair/clothes 走了 `sd15.anime`，face 小洞走了 Telea
+- 未做 / 已知缺陷：`simple-lama-inpainting` 钉死 numpy<2，本机未装，小洞目前是 Telea 回退。区域框+启发式仍可能把碎块标成 acc。`[gpu]` extra 仍未声明 sam2；git 历史里仍有测试图 / skill
+
 ## 2026-09-18 — acc 去重 + 清空 logs
 
 - 做了：overlay 同 role 且 mask IoU≥0.5，或小块 75% 落在已留大块里，只留一块（Imagine 不同标签贴到同一像素 / 嵌在大饰品里不再堆 `acc_*`）；左右鞋等空间分离的仍多分。每次 run 开始截断 `logs/run.jsonl`，不再追加旧次。补了 refine 与 log 回归

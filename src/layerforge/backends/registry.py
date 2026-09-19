@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from layerforge.backends.inpaint.router import RoutedInpaint
 from layerforge.backends.inpaint.identity import IdentityInpaint
 from layerforge.backends.inpaint.lama import LamaInpaint
 from layerforge.backends.inpaint.opencv_telea import OpencvTeleaInpaint
@@ -36,7 +37,9 @@ def build_segment(name: str, cfg: dict, kind: str, dry_run: bool):
 def build_inpaint(name: str, cfg: dict, dry_run: bool):
     resolved = "identity" if dry_run and name in {"auto", "sd15.anime", "lama"} else name
     if resolved == "auto":
-        resolved = "identity"
+        backend = RoutedInpaint(cfg)
+        backend.name = "auto"
+        return backend
     mapping = {
         "identity": lambda: IdentityInpaint(),
         "lama": lambda: LamaInpaint(cfg),

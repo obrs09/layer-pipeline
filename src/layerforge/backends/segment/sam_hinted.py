@@ -6,6 +6,24 @@ import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
 from layerforge.config import resolve_path
+from layerforge.image_io import bbox_from_mask
+
+
+def region_prompt_boxes(fg_bbox: list[int], specs: dict) -> list[tuple[str, list[float]]]:
+    """Map taxonomy role → xyxy box inside the foreground bbox using YAML fractions."""
+    x, y, w, h = fg_bbox
+    out: list[tuple[str, list[float]]] = []
+    for role, spec in (specs or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        x0 = x + int(float(spec.get("left", 0.0)) * w)
+        y0 = y + int(float(spec.get("top", 0.0)) * h)
+        x1 = x + int(float(spec.get("right", 1.0)) * w)
+        y1 = y + int(float(spec.get("bottom", 1.0)) * h)
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            continue
+        out.append((str(role), [float(x0), float(y0), float(x1), float(y1)]))
+    return out
 
 
 class SamHintedSegment:
@@ -15,6 +33,7 @@ class SamHintedSegment:
         self.cfg = cfg
         self._predictor = None
         self._generator = None
+        self._backend: dict = {}
 
     def _cuda_or_die(self) -> str:
         try:
@@ -56,6 +75,7 @@ class SamHintedSegment:
             import yaml
 
             backend = yaml.safe_load(backend_path.read_text(encoding="utf-8")) or {}
+        self._backend = backend
         model_cfg = backend.get("model_cfg", "configs/sam2.1/sam2.1_hiera_l.yaml")
         last_err = None
         sam = None
@@ -186,6 +206,7 @@ class SamHintedSegment:
                 score=float(np.max(scores)),
             )
         ]
+        layers.extend(self._region_role_masks(fg, [x, y, bw, bh], body))
         if self._generator is None:
             return layers
         extras = self._generator.generate(rgb)
@@ -212,6 +233,33 @@ class SamHintedSegment:
                 )
             )
             unknown_i += 1
+        return layers
+
+    def _region_role_masks(self, fg: np.ndarray, fg_bbox: list[int], body: np.ndarray) -> list[LayerMask]:
+        specs = self._backend.get("region_prompts") or {}
+        layers: list[LayerMask] = []
+        for role, xyxy in region_prompt_boxes(fg_bbox, specs):
+            masks, scores, _ = self._predictor.predict(
+                box=np.array(xyxy, dtype=np.float32),
+                multimask_output=True,
+            )
+            chosen = self._pick(masks, scores) & fg
+            if int(chosen.sum()) < 64:
+                continue
+            inter = int((chosen & body).sum())
+            union = int((chosen | body).sum())
+            if union and inter / union > 0.92:
+                continue
+            layers.append(
+                LayerMask(
+                    role=role,
+                    label=f"sam_{role}",
+                    visible=(chosen.astype(np.uint8) * 255),
+                    source="sam",
+                    notes=f"sam2 region box for {role}; multimask pick-one",
+                    score=float(np.max(scores)),
+                )
+            )
         return layers
 
 
