@@ -130,8 +130,9 @@ def assign_residual_to_body(
     source: np.ndarray,
     min_area: int = 64,
     background_luma: int = 250,
+    max_frac: float = 0.04,
 ) -> list[LayerMask]:
-    """Give unclaimed foreground pixels to body so hair wisps / hems stay on a layer."""
+    """Fold tiny unclaimed crumbs into body. Do not dump leftover hair/clothes."""
     if not layers:
         return layers
     fg = foreground_mask(source, background_luma) > 0
@@ -139,7 +140,11 @@ def assign_residual_to_body(
     for layer in layers:
         claimed |= layer.visible > 0
     residual = fg & ~claimed
-    if int(residual.sum()) < min_area:
+    leftover = int(residual.sum())
+    if leftover < min_area:
+        return layers
+    fg_area = max(1, int(fg.sum()))
+    if leftover / fg_area > max_frac:
         return layers
     bodies = [layer for layer in layers if layer.role == "body"]
     if bodies:

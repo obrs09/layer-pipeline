@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +8,7 @@ from PIL import Image
 
 from layerforge.config import load_config
 from layerforge.ingest.imagine_parts import ingest_imagine
+from layerforge.logutil import write_tags_json
 from layerforge.pipeline import run_pipeline
 from layerforge.taxonomy import load_taxonomy
 
@@ -108,6 +110,14 @@ def test_export_clears_stale_layer_files(tmp_path: Path):
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     expected = {Path(layer["file"]).name for layer in manifest["layers"]}
     assert names == expected
+
+
+def test_write_tags_json_ranked(tmp_path: Path):
+    path = write_tags_json(tmp_path / "logs" / "tags.json", {"white_hair": 0.91, "1girl": 0.99})
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["count"] == 2
+    assert data["tags"][0]["tag"] == "1girl"
+    assert data["tags"][1]["tag"] == "white_hair"
 
 
 def test_export_resets_run_log(tmp_path: Path):

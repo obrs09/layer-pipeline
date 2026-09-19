@@ -71,12 +71,14 @@ def _load_tags(csv_path: Path) -> list[str]:
 
 
 def _preprocess(rgb: np.ndarray, size: int) -> np.ndarray:
-    h, w = rgb.shape[:2]
-    side = max(h, w)
-    canvas = np.zeros((side, side, 3), dtype=np.uint8)
-    canvas[:h, :w] = rgb
-    image = Image.fromarray(canvas).resize((size, size), Image.Resampling.BILINEAR)
-    arr = np.array(image, dtype=np.float32)
-    arr = arr[:, :, ::-1]  # WD ONNX expects BGR
-    arr = arr / 127.5 - 1.0
+    """WD SwinV2 v3 ONNX: white square pad, bicubic 448, BGR, float32 0-255, NHWC."""
+    image = Image.fromarray(rgb[:, :, :3]).convert("RGB")
+    w, h = image.size
+    side = max(w, h)
+    canvas = Image.new("RGB", (side, side), (255, 255, 255))
+    canvas.paste(image, ((side - w) // 2, (side - h) // 2))
+    if side != size:
+        canvas = canvas.resize((size, size), Image.Resampling.BICUBIC)
+    arr = np.asarray(canvas, dtype=np.float32)
+    arr = arr[:, :, ::-1]
     return arr[None]

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import cv2
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.usable import usable
 from layerforge.taxonomy import Taxonomy, load_taxonomy
+
+_BODY_PUNCH_ROLES = {"clothes", "hair_back", "hair_front"}
 
 
 class CascadeSegment:
@@ -46,11 +49,13 @@ class CascadeSegment:
         self.missing: list[str] = []
         self.needs_click: list[str] = []
         self.inventory: list[str] = []
+        self.tags: dict[str, float] = {}
 
     def segment(self, image: np.ndarray, hints: SegmentHints) -> list[LayerMask]:
         self.missing = []
         self.needs_click = []
         self.inventory = []
+        self.tags = {}
         if hints.parts:
             return self._from_parts(image, hints.parts)
         return self._from_flat(image)
@@ -58,6 +63,7 @@ class CascadeSegment:
     def _from_flat(self, image: np.ndarray) -> list[LayerMask]:
         character = self._cut_character(image)
         tags = self._tag(image)
+        self.tags = dict(tags)
         inventory = build_inventory(tags, self.taxonomy, self.tag_threshold)
         self.inventory = list(inventory)
         self._prepare_sam2(image)
@@ -74,18 +80,25 @@ class CascadeSegment:
                     continue
                 skip_pair.add(family)
                 left, right = self.taxonomy.pair_roles[family]
-                if left in inventory:
-                    layer = self._cut_one(image, character, left, kept)
-                    if layer is not None:
-                        kept.append(layer)
-                    elif self.taxonomy.spec(left).required:
-                        self._mark_missing(left)
-                if right in inventory:
-                    layer = self._cut_one(image, character, right, kept)
-                    if layer is not None:
-                        kept.append(layer)
-                    elif self.taxonomy.spec(right).required:
-                        self._mark_missing(right)
+                pair_layers = self._cut_pair(image, character, family, kept)
+                have = {layer.role for layer in pair_layers}
+                for member in (left, right):
+                    if member not in inventory or member in have:
+                        continue
+                    fallback = self._cut_one(image, character, member, kept + pair_layers)
+                    if fallback is not None:
+                        pair_layers.append(fallback)
+                        have.add(member)
+                kept.extend(pair_layers)
+                for member in (left, right):
+                    if member not in inventory:
+                        continue
+                    if member in have:
+                        continue
+                    if self.taxonomy.spec(member).required:
+                        self._mark_missing(member)
+                    elif member not in self.needs_click:
+                        self.needs_click.append(member)
                 continue
             if role == "acc":
                 kept.extend(self._cut_acc(image, character, kept))
@@ -230,6 +243,170 @@ class CascadeSegment:
         _ = last_reasons
         return None
 
+    def _cut_pair(
+        self,
+        image: np.ndarray,
+        character: np.ndarray,
+        family: str,
+        others: list[LayerMask],
+    ) -> list[LayerMask]:
+        left, right = self.taxonomy.pair_roles[family]
+        spec_l = self.taxonomy.spec(left)
+        spec_r = self.taxonomy.spec(right)
+        detections: list[tuple[str, list[float], float]] = []
+        threshold = self.dino_threshold
+        query_groups = [
+            list(self.taxonomy.pair_queries.get(family, (family,))),
+            list(spec_l.queries),
+            list(spec_r.queries),
+        ]
+        if self.boxes is not None:
+            for group in query_groups:
+                if not group:
+                    continue
+                detections.extend(self.boxes.detect(image, group, threshold) or [])
+            face_box = self._face_anchor(image, character, others)
+            if face_box is not None:
+                detections.extend(
+                    self._detect_in_box(
+                        image,
+                        face_box,
+                        list(self.taxonomy.pair_queries.get(family, (family,))),
+                        threshold,
+                    )
+                )
+            boxes = _filter_boxes_for_spec(
+                _spatial_pair(_boxes_on_character(_nms_boxes(detections), character)),
+                character,
+                spec_l,
+            )
+            if len(boxes) < 2:
+                threshold = max(0.08, threshold * 0.7)
+                extra: list[tuple[str, list[float], float]] = []
+                for group in query_groups:
+                    if not group:
+                        continue
+                    extra.extend(self.boxes.detect(image, group, threshold) or [])
+                if face_box is not None:
+                    extra.extend(
+                        self._detect_in_box(
+                            image,
+                            face_box,
+                            list(self.taxonomy.pair_queries.get(family, (family,))),
+                            threshold,
+                        )
+                    )
+                detections = detections + extra
+        else:
+            face_box = self._face_anchor(image, character, others)
+        boxes = _filter_boxes_for_spec(
+            _spatial_pair(_boxes_on_character(_nms_boxes(detections), character)),
+            character,
+            spec_l,
+        )
+        if face_box is None:
+            face_box = self._face_anchor(image, character, others)
+        if len(boxes) == 1:
+            cx = _box_center(face_box)[0] if face_box else _mask_center_x(character)
+            if cx is not None:
+                mirrored = _mirror_box(boxes[0], cx, character.shape)
+                if face_box is not None:
+                    mirrored = _clip_box(mirrored, face_box)
+                if _box_iou(mirrored, boxes[0]) < 0.45 and _box_area(mirrored) > 4:
+                    boxes = _spatial_pair(boxes + [mirrored])
+        assigned: dict[str, list[float]] = {}
+        if len(boxes) >= 2:
+            ordered = sorted(boxes, key=lambda box: (box[0] + box[2]) / 2.0)
+            assigned[left] = ordered[0]
+            assigned[right] = ordered[-1]
+        elif len(boxes) == 1:
+            cx = _box_center(face_box)[0] if face_box else (_mask_center_x(character) or 0.0)
+            box = boxes[0]
+            assigned[left if _box_center(box)[0] <= cx else right] = box
+        if self.sam2 is None:
+            return []
+        inventory = set(self.inventory)
+        layers: list[LayerMask] = []
+        for role, box in assigned.items():
+            if role not in inventory:
+                continue
+            spec = self.taxonomy.spec(role)
+            pos = [_box_center(box)]
+            neg = _neighbor_negatives(others + layers, spec.exclude_roles)
+            for other_role, other_box in assigned.items():
+                if other_role != role:
+                    neg.append(_box_center(other_box))
+            mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
+            if mask is None:
+                if role not in self.needs_click:
+                    self.needs_click.append(role)
+                continue
+            mask = ((mask > 0) & (character > 0)).astype(np.uint8) * 255
+            result = usable(mask, spec, character, others + layers, box)
+            if result.ok:
+                layers.append(
+                    _layer(
+                        role,
+                        result.mask,
+                        min(result.score, float(sam_score)),
+                        f"sam2.pair family={family}; score={sam_score:.3f}",
+                    )
+                )
+            elif role not in self.needs_click:
+                self.needs_click.append(role)
+        return layers
+
+    def _face_anchor(
+        self,
+        image: np.ndarray,
+        character: np.ndarray,
+        others: list[LayerMask],
+    ) -> list[float] | None:
+        for layer in others:
+            if layer.role != "face":
+                continue
+            if int((layer.visible > 0).sum()) == 0:
+                continue
+            return _xyxy_from_wh(layer.bbox)
+        if self.boxes is None:
+            return None
+        detections = self.boxes.detect(image, ["anime face", "face"], self.dino_threshold) or []
+        if not detections:
+            return None
+        return _pick_box(detections, character, "face")
+
+    def _detect_in_box(
+        self,
+        image: np.ndarray,
+        box: list[float],
+        queries: list[str],
+        threshold: float,
+    ) -> list[tuple[str, list[float], float]]:
+        if self.boxes is None or not queries:
+            return []
+        x0, y0, x1, y1 = [int(round(v)) for v in box]
+        h, w = image.shape[:2]
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(w, x1), min(h, y1)
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            return []
+        crop = image[y0:y1, x0:x1]
+        detections = self.boxes.detect(crop, queries, threshold) or []
+        crop_h, crop_w = crop.shape[:2]
+        remapped: list[tuple[str, list[float], float]] = []
+        for label, xyxy, score in detections:
+            if xyxy[2] <= crop_w + 1.5 and xyxy[3] <= crop_h + 1.5:
+                remapped.append(
+                    (
+                        label,
+                        [xyxy[0] + x0, xyxy[1] + y0, xyxy[2] + x0, xyxy[3] + y0],
+                        float(score),
+                    )
+                )
+            else:
+                remapped.append((label, [float(v) for v in xyxy], float(score)))
+        return remapped
+
     def _cut_acc(
         self,
         image: np.ndarray,
@@ -264,21 +441,34 @@ class CascadeSegment:
     ) -> LayerMask | None:
         claimed = np.zeros(character.shape, dtype=bool)
         for layer in others:
-            if self.taxonomy.spec(layer.role).overlay:
+            spec = self.taxonomy.spec(layer.role)
+            if spec.overlay:
                 continue
-            claimed |= layer.visible > 0
+            vis = (layer.visible > 0).astype(np.uint8)
+            extra = 0
+            if layer.role in _BODY_PUNCH_ROLES:
+                extra = min(int(spec.expand_px), 16)
+            elif layer.role == "face":
+                extra = min(int(spec.expand_px), 4)
+            if extra > 0:
+                vis = _dilate(vis, extra)
+            claimed |= vis > 0
         residual = (character > 0) & ~claimed
         mask = residual.astype(np.uint8) * 255
         spec = self.taxonomy.spec("body")
         result = usable(mask, spec, character, others, None)
         if result.ok:
             return _layer("body", result.mask, result.score, "character residual")
-        if self.boxes is None or self.sam2 is None:
-            if int(residual.sum()) >= 64:
-                return _layer("body", mask, 0.4, "character residual weak")
-            return None
-        layer = self._cut_one(image, character, "body", others)
-        return layer
+        if self.boxes is not None and self.sam2 is not None:
+            layer = self._cut_one(image, character, "body", others)
+            if layer is not None:
+                punched = (layer.visible > 0) & ~claimed
+                layer.visible = punched.astype(np.uint8) * 255
+                if int((layer.visible > 0).sum()) >= 64:
+                    return layer
+        if int(residual.sum()) >= 64:
+            return _layer("body", mask, 0.4, "character residual weak")
+        return None
 
     def _mark_missing(self, role: str) -> None:
         if role not in self.missing:
@@ -348,3 +538,116 @@ def _neighbor_negatives(others: list[LayerMask], exclude_roles: tuple[str, ...])
             continue
         points.append((float(xs.mean()), float(ys.mean())))
     return points[:6]
+
+
+def _dilate(mask: np.ndarray, px: int) -> np.ndarray:
+    if px <= 0:
+        return mask
+    k = 2 * int(px) + 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    return cv2.dilate(mask.astype(np.uint8), kernel, iterations=1)
+
+
+def _box_iou(a: list[float], b: list[float]) -> float:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+    return inter / max(1e-6, area_a + area_b - inter)
+
+
+def _nms_boxes(
+    detections: list[tuple[str, list[float], float]],
+    iou_thresh: float = 0.45,
+) -> list[tuple[str, list[float], float]]:
+    kept: list[tuple[str, list[float], float]] = []
+    for item in sorted(detections, key=lambda det: float(det[2]), reverse=True):
+        if all(_box_iou(item[1], prev[1]) < iou_thresh for prev in kept):
+            kept.append(item)
+    return kept
+
+
+def _boxes_on_character(
+    detections: list[tuple[str, list[float], float]],
+    character: np.ndarray,
+    min_hit: float = 0.15,
+) -> list[list[float]]:
+    char = character > 0
+    h, w = char.shape
+    out: list[list[float]] = []
+    for _label, box, _score in detections:
+        x0, y0, x1, y1 = [int(round(v)) for v in box]
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(w, x1), min(h, y1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        if float(char[y0:y1, x0:x1].mean()) >= min_hit:
+            out.append([float(v) for v in box])
+    return out
+
+
+def _spatial_pair(boxes: list[list[float]]) -> list[list[float]]:
+    if len(boxes) < 2:
+        return list(boxes)
+    ordered = sorted(boxes, key=lambda box: (box[0] + box[2]) / 2.0)
+    left, right = ordered[0], ordered[-1]
+    gap = _box_center(right)[0] - _box_center(left)[0]
+    width = max(right[2] - right[0], left[2] - left[0], 1.0)
+    if gap < 0.6 * width:
+        return [left]
+    return [left, right]
+
+
+def _box_area(box: list[float]) -> float:
+    return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
+
+
+def _clip_box(box: list[float], limit: list[float]) -> list[float]:
+    return [
+        max(box[0], limit[0]),
+        max(box[1], limit[1]),
+        min(box[2], limit[2]),
+        min(box[3], limit[3]),
+    ]
+
+
+def _filter_boxes_for_spec(
+    boxes: list[list[float]],
+    character: np.ndarray,
+    spec,
+) -> list[list[float]]:
+    char_area = max(1, int((character > 0).sum()))
+    cap = max(spec.max_area_frac * 2.5, 0.08)
+    out: list[list[float]] = []
+    for box in boxes:
+        if _box_area(box) / char_area > cap:
+            continue
+        if _box_area(box) < 4:
+            continue
+        out.append(box)
+    return out
+
+
+def _mirror_box(box: list[float], cx: float, shape: tuple[int, ...]) -> list[float]:
+    x0, y0, x1, y1 = box
+    width = x1 - x0
+    old_cx = (x0 + x1) / 2.0
+    new_cx = 2.0 * float(cx) - old_cx
+    h, w = int(shape[0]), int(shape[1])
+    nx0 = min(max(0.0, new_cx - width / 2.0), float(max(0, w - 1)))
+    nx1 = min(max(nx0 + 1.0, new_cx + width / 2.0), float(w))
+    ny0 = min(max(0.0, y0), float(max(0, h - 1)))
+    ny1 = min(max(ny0 + 1.0, y1), float(h))
+    return [nx0, ny0, nx1, ny1]
+
+
+def _mask_center_x(mask: np.ndarray) -> float | None:
+    _ys, xs = np.where(mask > 0)
+    if xs.size == 0:
+        return None
+    return float(xs.mean())

@@ -44,6 +44,7 @@ refine:
   mutex: true
   overlay_iou: 0.5
   overlay_contain: 0.75
+  residual_max_frac: 0.04
 
 occlusion:
   background_luma: 250

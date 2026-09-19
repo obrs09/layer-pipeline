@@ -21,3 +21,14 @@ class RunLog:
         }
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def write_tags_json(path: Path, tags: dict[str, float]) -> Path:
+    ranked = [
+        {"tag": name, "score": round(float(score), 6)}
+        for name, score in sorted(tags.items(), key=lambda item: (-float(item[1]), item[0]))
+    ]
+    payload = {"count": len(ranked), "tags": ranked}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path

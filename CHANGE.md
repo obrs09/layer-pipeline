@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 成对切眼 + body 打洞 + 保存 WDTagger
+
+- 做了：眼睛按 pair 切（family query + 左右 query 分开、脸裁切再检、镜面补框，失败再回退 `_cut_one`）。`hair_back` 默认进库存（bald 除外）；body 残差打掉膨胀后的 hair/clothes/face，大块未认领前景不再折进 body。WDTagger 预处理改成 v3 白边正方形 + BICUBIC + BGR 0–255 NHWC，结果写入 `logs/tags.json`（不改 manifest schema）。本机重跑 `sam_flat3`。**没改 .venv、没升 schema、没实现 future/**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest && .\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag/grok-image-4034a197-286e-45f1-8049-60f91c89d8a8.jpg --out runs --segment cascade --inpaint auto --job-id sam_flat3`
+- 产物路径：`runs/sam_flat3`（schema v2；`logs/tags.json`：1girl/white_hair/short_hair 等；layers: body/clothes/face/eye_l/mouth/hair_front/acc×2）
+- 未做 / 已知缺陷：`eye_r` 仍 missing（头侧倾 + 右眼埋在头发里，镜像/脸裁切没出可用框）。头发整块进了 `hair_front`，`hair_back` missing。body 不再含整头白发和外套，但仍有颈侧发丝和胸前绑带。SAM3 仍无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — DINO API + manifest v2 + sam_flat2
 
 - 做了：Grounding DINO 后处理按 transformers 签名传 `threshold`（旧版仍走 `box_threshold`）。`missing` / `needs_click` 升到 `layerforge.manifest.v2`，v1 读入会补默认值。本机跑通 `--segment cascade --inpaint auto --job-id sam_flat2`。**没改 .venv、没装 SAM3**

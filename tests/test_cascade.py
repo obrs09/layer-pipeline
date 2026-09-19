@@ -60,10 +60,13 @@ class _Sam3:
 class _Sam2:
     name = "sam2.hinted"
 
-    def __init__(self, mask):
+    def __init__(self, mask=None, *, fill_box: bool = False, shape=(48, 48)):
         self.mask = mask
+        self.fill_box = fill_box
+        self.shape = shape
         self.calls = 0
         self.neg_points = None
+        self.boxes: list[list[float]] = []
 
     def prepare(self, rgb):
         return None
@@ -71,6 +74,16 @@ class _Sam2:
     def predict_box_points(self, box, positive, negative):
         self.calls += 1
         self.neg_points = list(negative or [])
+        self.boxes.append(list(box))
+        if self.fill_box:
+            h, w = self.shape
+            vis = np.zeros((h, w), dtype=np.uint8)
+            x0, y0, x1, y1 = [int(round(v)) for v in box]
+            x0, y0 = max(0, x0), max(0, y0)
+            x1, y1 = min(w, x1), min(h, y1)
+            if x1 > x0 and y1 > y0:
+                vis[y0:y1, x0:x1] = 255
+            return vis, 0.9
         return self.mask, 0.9
 
 
@@ -169,3 +182,89 @@ def test_imagine_skips_tagger_and_keeps_unusable_as_needs_click():
     by_role = {layer.role: layer for layer in out}
     assert by_role["eye_l"].needs_click
     assert not by_role["eye_r"].needs_click
+
+
+def test_pair_eyes_split_family_boxes_by_x():
+    dino = _Dino({"eye": [[6, 10, 14, 18], [30, 10, 38, 18]]})
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99}),
+        boxes=dino,
+        sam3=_Sam3({}),
+        sam2=_Sam2(fill_box=True),
+    )
+    layers = cascade.segment(_image(), SegmentHints())
+    by_role = {layer.role: layer for layer in layers}
+    assert "eye_l" in by_role
+    assert "eye_r" in by_role
+    assert by_role["eye_l"].bbox[0] < by_role["eye_r"].bbox[0]
+    assert any("eye" in queries for queries in dino.calls)
+    assert cascade.tags["1girl"] == 0.99
+
+
+def test_pair_uses_left_and_right_queries_separately():
+    dino = _Dino(
+        {
+            "left eye": [[6, 10, 14, 18]],
+            "right eye": [[30, 10, 38, 18]],
+        }
+    )
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99}),
+        boxes=dino,
+        sam3=_Sam3({}),
+        sam2=_Sam2(fill_box=True),
+    )
+    layers = cascade.segment(_image(), SegmentHints())
+    by_role = {layer.role: layer for layer in layers}
+    assert "eye_l" in by_role
+    assert "eye_r" in by_role
+    assert any(queries == ["left eye", "left eye anime"] for queries in dino.calls)
+    assert any(queries == ["right eye", "right eye anime"] for queries in dino.calls)
+
+
+def test_one_eye_box_mirrors_across_face():
+    dino = _Dino(
+        {
+            "eye": [[8, 12, 16, 20]],
+            "anime face": [[10, 6, 38, 28]],
+            "face": [[10, 6, 38, 28]],
+        }
+    )
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99}),
+        boxes=dino,
+        sam3=_Sam3({}),
+        sam2=_Sam2(fill_box=True),
+    )
+    layers = cascade.segment(_image(), SegmentHints())
+    by_role = {layer.role: layer for layer in layers}
+    assert "eye_l" in by_role
+    assert "eye_r" in by_role
+    assert by_role["eye_l"].bbox[0] < by_role["eye_r"].bbox[0]
+
+
+def test_body_residual_punches_clothes_and_hair():
+    cascade = CascadeSegment({}, load_taxonomy(), character=_Cut(), tagger=_Tagger({}))
+    h, w = 128, 96
+    character = np.full((h, w), 255, dtype=np.uint8)
+    clothes_vis = np.zeros((h, w), dtype=np.uint8)
+    clothes_vis[50:100, 20:76] = 255
+    hair_vis = np.zeros((h, w), dtype=np.uint8)
+    hair_vis[4:40, 16:80] = 255
+    clothes = LayerMask(role="clothes", label="clothes", visible=clothes_vis, source="sam")
+    hair = LayerMask(role="hair_back", label="hair", visible=hair_vis, source="sam")
+    image = np.full((h, w, 4), 40, dtype=np.uint8)
+    body = cascade._body_from_residual(character, [clothes, hair], image)
+    assert body is not None
+    assert body.visible[70, 48] == 0
+    assert body.visible[20, 48] == 0
+    assert body.visible[120, 48] > 0

@@ -14,6 +14,7 @@ def test_required_eyes_and_face_always_wanted():
     assert "face" in wanted
     assert "body" in wanted
     assert "clothes" in wanted
+    assert "hair_back" in wanted
     assert "hair_front" not in wanted
     assert "acc" not in wanted
 
@@ -23,6 +24,13 @@ def test_bangs_tag_requests_front_hair():
     wanted = build_inventory({"1girl": 0.9, "bangs": 0.8, "long_hair": 0.7}, tax)
     assert "hair_front" in wanted
     assert "hair_back" in wanted
+
+
+def test_white_hair_requests_front_hair():
+    tax = load_taxonomy()
+    wanted = build_inventory({"1girl": 0.9, "white_hair": 0.8}, tax)
+    assert "hair_back" in wanted
+    assert "hair_front" in wanted
 
 
 def test_bald_skips_hair():

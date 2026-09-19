@@ -12,7 +12,7 @@ from layerforge.backends.registry import build_inpaint, build_segment
 from layerforge.contracts import SCHEMA, BackendInfo, Canvas, LayerRecord, Manifest, validate_manifest
 from layerforge.image_io import alpha_over, bbox_from_mask
 from layerforge.ingest import ingest_input
-from layerforge.logutil import RunLog
+from layerforge.logutil import RunLog, write_tags_json
 from layerforge.ops.assign_roles import assign_roles
 from layerforge.ops.normalize import resize_max_side, to_rgba
 from layerforge.ops.occlusion import plan_occlusion
@@ -67,6 +67,15 @@ def run_pipeline(
     log.write("backends", segment=segment.name, inpaint=inpaint.name)
 
     masks = segment.segment(source, ingested.hints)
+    tags = getattr(segment, "tags", None) or {}
+    if tags:
+        write_tags_json(out_dir / "logs" / "tags.json", tags)
+        top = sorted(tags.items(), key=lambda item: (-float(item[1]), item[0]))[:16]
+        log.write(
+            "tags",
+            count=len(tags),
+            top=[{"tag": name, "score": round(float(score), 4)} for name, score in top],
+        )
     log.write(
         "segment",
         count=len(masks),
@@ -89,6 +98,7 @@ def run_pipeline(
         source,
         min_area=int(refine_cfg.get("min_area", 64)),
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
+        max_frac=float(refine_cfg.get("residual_max_frac", 0.04)),
     )
     log.write("refine", count=len(masks))
     occ_map = plan_occlusion(

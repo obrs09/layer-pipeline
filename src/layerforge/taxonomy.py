@@ -41,6 +41,7 @@ class Taxonomy:
     pair_roles: dict[str, tuple[str, str]]
     pair_aliases: dict[str, str]
     alias_to_role: dict[str, str]
+    pair_queries: dict[str, tuple[str, ...]]
 
     def spec(self, role: str) -> RoleSpec:
         if role not in self.roles:
@@ -133,9 +134,14 @@ def load_taxonomy(path: str | Path | None = None) -> Taxonomy:
         _norm(alias): family
         for alias, family in (raw.get("pair_aliases") or {}).items()
     }
+    pair_queries = {
+        family: tuple(queries)
+        for family, queries in (raw.get("pair_queries") or {}).items()
+    }
     return Taxonomy(
         roles=roles,
         pair_roles=pair_roles,
         pair_aliases=pair_aliases,
         alias_to_role=alias_to_role,
+        pair_queries=pair_queries,
     )

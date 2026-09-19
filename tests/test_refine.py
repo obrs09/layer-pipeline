@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask
-from layerforge.ops.refine import refine_masks
+from layerforge.ops.refine import assign_residual_to_body, refine_masks
 from layerforge.taxonomy import load_taxonomy
 
 
@@ -44,6 +44,25 @@ def test_eyes_are_not_merged_across_roles():
     out = refine_masks([left, right], load_taxonomy())
     roles = {layer.role for layer in out}
     assert roles == {"eye_l", "eye_r"}
+
+
+def test_large_unclaimed_fg_not_dumped_on_body():
+    body = _mask("body", "body", 20, 4, h=8, w=8)
+    source = np.full((32, 40, 3), 255, dtype=np.uint8)
+    source[2:30, 2:38] = 10
+    out = assign_residual_to_body([body], source, min_area=64, max_frac=0.04)
+    assert int((out[0].visible > 0).sum()) == 8 * 8
+    assert "folded" not in out[0].notes
+
+
+def test_small_unclaimed_fg_folds_into_body():
+    body = _mask("body", "body", 8, 8, h=16, w=16)
+    source = np.full((32, 40, 3), 255, dtype=np.uint8)
+    source[8:24, 8:24] = 10
+    source[8:12, 24:28] = 10
+    out = assign_residual_to_body([body], source, min_area=8, max_frac=0.2)
+    assert int((out[0].visible > 0).sum()) > 16 * 16
+    assert "folded" in out[0].notes
 
 
 def test_mutex_face_wins_over_hair_back():

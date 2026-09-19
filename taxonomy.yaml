@@ -21,11 +21,11 @@ roles:
     expand_px: 24
     occluded_by: [body, arm_l, arm_r, clothes, face, hair_front, acc]
     cut_priority: 65
-    required: false
-    required_if_tags: [long_hair, ponytail, twintails, braid, hair_over_shoulder]
+    required: true
+    required_if_tags: [long_hair, ponytail, twintails, braid, hair_over_shoulder, white_hair, silver_hair, grey_hair, short_hair]
     skip_if_tags: [bald]
-    tag_names: [long_hair, ponytail, twintails]
-    queries: ["back hair", "long hair behind", "hair from behind"]
+    tag_names: [long_hair, ponytail, twintails, white_hair]
+    queries: ["hair", "anime hair", "long hair", "back hair"]
     exclude_roles: [face, hair_front]
     aliases: [hair-back, long-hair-back]
     usable:
@@ -56,7 +56,7 @@ roles:
       - anime-girl
     usable:
       min_area_frac: 0.03
-      max_area_frac: 0.85
+      max_area_frac: 0.50
       max_components: 8
       min_box_cover: 0.25
       max_out_of_box: 0.6
@@ -112,7 +112,7 @@ roles:
     occluded_by: [arm_l, arm_r, hair_front, acc]
     cut_priority: 50
     required: true
-    queries: ["anime clothes", "school uniform", "dress", "shirt"]
+    queries: ["anime clothes", "school uniform", "dress", "shirt", "jacket", "coat"]
     exclude_roles: [face, hair_front]
     aliases:
       - dress
@@ -255,9 +255,9 @@ roles:
     occluded_by: [acc]
     cut_priority: 70
     required: false
-    required_if_tags: [bangs, twintails, long_hair, blunt_bangs, hair_over_one_eye]
+    required_if_tags: [bangs, twintails, long_hair, blunt_bangs, hair_over_one_eye, white_hair, silver_hair, short_hair]
     skip_if_tags: [bald]
-    tag_names: [bangs, blunt_bangs]
+    tag_names: [bangs, blunt_bangs, white_hair]
     queries: ["bangs", "front hair", "hair over face"]
     exclude_roles: [face, eye_l, eye_r]
     aliases:
@@ -312,6 +312,11 @@ roles:
       min_box_cover: 0.4
       max_out_of_box: 0.5
       max_overlap_frac: 0.8
+
+pair_queries:
+  eye: ["eye", "anime eye"]
+  brow: ["eyebrow", "anime eyebrow"]
+  arm: ["arm", "bare arm"]
 
 pair_roles:
   eye: [eye_l, eye_r]
