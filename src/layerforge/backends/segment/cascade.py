@@ -5,7 +5,6 @@ from dataclasses import replace
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
-from layerforge.backends.detect.dwpose import clip_character_to_person
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.usable import usable
@@ -13,10 +12,10 @@ from layerforge.taxonomy import Taxonomy, load_taxonomy
 
 
 class CascadeSegment:
-    """anime-segmentation → DWPose clip/hints → WDTagger → DINO → SAM3/SAM2.
+    """anime-segmentation → WDTagger → DINO → SAM3/SAM2. DWPose is hints only.
 
-    Pose is hints, not inventory. Body is anatomical (pose person minus clothes/hair),
-    not leftover rims. Never average SAM. Max 4 attempts / role.
+    Character cut is isnet. Pose never overwrites that mask. Body is character
+    residual after clothes/hair, not leftover rims. Never average SAM.
     Imagine parts skip detect 1–4 and only check / recut failures.
     """
 
@@ -82,8 +81,8 @@ class CascadeSegment:
 
     def _from_flat(self, image: np.ndarray) -> list[LayerMask]:
         character = self._cut_character(image)
-        character = self._clip_with_pose(image, character)
         self._dump_character(image, character)
+        self._apply_pose_hints(image)
         tags = self._tag(image)
         self.tags = dict(tags)
         inventory = build_inventory(tags, self.taxonomy, self.tag_threshold)
@@ -218,22 +217,18 @@ class CascadeSegment:
         self.character_mask = mask
         return mask
 
-    def _clip_with_pose(self, image: np.ndarray, character: np.ndarray) -> np.ndarray:
-        if self.dump is not None:
-            self.dump.write_character_raw(image, character)
+    def _apply_pose_hints(self, image: np.ndarray) -> None:
+        """Skeleton boxes/points for SAM. Does not change the isnet character mask."""
         if self.pose is None:
-            return character
+            return
         estimate = self.pose.estimate(image)
         if estimate is None:
-            return character
+            return
         if self.dump is not None:
             self.dump.write_pose(image, estimate)
-        clipped = clip_character_to_person(character, estimate.person_mask)
         self.pose_person = estimate.person_mask
         self.pose_boxes = dict(estimate.boxes or {})
         self.pose_points = dict(estimate.points or {})
-        self.character_mask = clipped
-        return clipped
 
     def _tag(self, image: np.ndarray) -> dict[str, float]:
         if self.tagger is None:
@@ -532,21 +527,17 @@ class CascadeSegment:
         if self.morph_open_px > 0:
             claimed = dilate_mask(claimed.astype(np.uint8) * 255, self.morph_open_px) > 0
         residual = (character > 0) & ~claimed
-        if self.pose_person is not None:
-            residual = residual & (self.pose_person > 0)
         mask = residual.astype(np.uint8) * 255
         mask = morph_open(mask, self.morph_open_px)
         spec = self.taxonomy.spec("body")
         result = usable(mask, spec, character, others, self.pose_boxes.get("body"))
-        notes = "pose person residual" if self.pose_person is not None else "character residual"
+        notes = "character residual"
         if result.ok:
             return _layer("body", result.mask, result.score, notes)
         if self.sam2 is not None:
             layer = self._cut_one(image, character, "body", others)
             if layer is not None:
                 punched = (layer.visible > 0) & ~claimed
-                if self.pose_person is not None:
-                    punched = punched & (self.pose_person > 0)
                 layer.visible = morph_open(punched.astype(np.uint8) * 255, self.morph_open_px)
                 if int((layer.visible > 0).sum()) >= 64:
                     layer.notes = f"{layer.notes}; {notes}"

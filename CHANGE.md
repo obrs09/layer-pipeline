@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 角色抠图只认 isnet，骨架不再覆盖
+
+- 做了：`01_character` 改回 anime-segmentation 原 mask，DWPose 只写 `01_pose/` 并给 SAM 部件框/正点，不再用骨架裁角色，也不再用 pose person 扣 body 残差。296a4352 那种头发/袖子被骨架切掉的问题来自这步，不是 isnet。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/01_character/` 就是 isnet；骨架在 `steps/01_pose/overlay.png`。296a4352 头发/袖子/裙子回来了。4034a197 `missing=[eye_r]`。45825594 / 9083053e / a1639e70 `missing=[]`
+- 未做 / 已知缺陷：9083053e 人躺在床上时 isnet 仍会连上家具，这次不靠骨架硬裁。前景遮挡没做。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 形态学收边 + DWPose 提示身体
 
 - 做了：mutex 后对非 overlay 做 `morph_open_px=2`，body 残差先把已切件膨胀 2px 再扣，去掉头发/衣服留在皮肤上的细边。加 `PoseEstimator` / DWPose（YOLOX+RTMPose ONNX）：骨架提示 face/body/arm 框和正点；二次元 YOLOX 经常检不到人时回退整图再估姿态。角色 mask 用骨架+躯干凸包+头部膨胀去裁 isnet（不把张开的四肢凸包填成床）。`body` 只表示姿态里的解剖身体/露肤，不是发缘或家具残差。`7d9f70f9` 已不测。本机重跑 `runs/flat`（新图 `296a4352` 替换了 7d9f）。**没改 schema、没改 .venv、没装 mmpose**

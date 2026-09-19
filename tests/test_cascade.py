@@ -338,7 +338,7 @@ class _Pose:
         )
 
 
-def test_pose_clips_character_and_body_residual():
+def test_pose_does_not_clip_character():
     person = np.zeros((48, 48), dtype=np.uint8)
     person[10:40, 12:36] = 255
     cascade = CascadeSegment(
@@ -352,12 +352,10 @@ def test_pose_clips_character_and_body_residual():
         pose=_Pose(person, boxes={"body": [14.0, 16.0, 34.0, 38.0]}),
     )
     image = _image()
-    layers = cascade.segment(image, SegmentHints())
-    assert int(cascade.character_mask[0, 0]) == 0
+    cascade.segment(image, SegmentHints())
+    assert int(cascade.character_mask[0, 0]) == 255
     assert int(cascade.character_mask[20, 20]) == 255
-    body = next(layer for layer in layers if layer.role == "body")
-    assert int(body.visible[2, 2]) == 0
-    assert "pose person" in body.notes
+    assert cascade.pose_boxes["body"] == [14.0, 16.0, 34.0, 38.0]
 
 
 def test_inject_pose_box_goes_first():
