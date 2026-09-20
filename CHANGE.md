@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 线稿停生长；暂时不切脖子
+
+- 做了：生长遇 Canny 线稿停步（`edge_stop`，`canny_low/high` 50/120），种子上的边仍保留。`cut_neck: false`：不再按下巴宽度收窄切脖子，下巴留在脸上。`cut_neck: true` 仍可打开旧逻辑。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（131 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/01_face.png`、`face_split.json`（`cut_neck: false`，`edge_stop: true`）。6 张都没有 `22_neck`。4034 下巴回来了。`missing`：`[]`
+- 未做 / 已知缺陷：4034 发缘白刺还在（线稿没封死）。a163 刘海几乎不剥（hair 64）。640 金发仍沾脸。脖子层整段关掉，不是修好了下颌判定。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 放宽生长阈值，补脸上的蛀洞
 
 - 做了：只改 `cascade.face_split` 数值。`local_dist` 16→20，`skin_dist` 18→24，`l_weight` 0.15→0.08（线稿/高光的亮度差少挡生长），`cheek_dilate_px` 12→24。新增 `hair_slack: 8`：皮肤比发色远一点仍可走（高光不再被发色一票否决）。**没改 schema、没改 .venv、没改生长算法**

@@ -27,6 +27,10 @@ def _cfg(**overrides) -> dict:
         "cheek_dilate_px": 12,
         "skin_mode": "grow",
         "local_dist": 20,
+        "cut_neck": False,
+        "edge_stop": True,
+        "canny_low": 50,
+        "canny_high": 120,
     }
     cfg.update(overrides)
     return cfg
@@ -76,32 +80,29 @@ def test_face_split_disabled_is_noop():
     assert int((out[0].visible > 0).sum()) == before
 
 
-def test_face_split_peels_hair_neck_and_other():
+def test_face_split_peels_hair_and_other():
     image, layers = _scene()
     out, report = split_face_colors(image, layers, load_taxonomy(), _cfg())
     by_role = {layer.role: layer for layer in out}
     assert report["applied"]
     face = by_role["face"].visible > 0
-    neck = by_role["neck"].visible > 0
     hair = by_role["hair_front"].visible > 0
     assert int(face.sum()) > 0
-    assert int(neck.sum()) >= 40
     assert int(hair.sum()) >= 20
+    assert report.get("cut_neck") is False
+    assert "neck" not in by_role
     # Gray bangs left the face and landed on hair.
     assert not face[12, 16]
     assert hair[12, 16]
     assert not face[12, 47]
-    # Neck is the lower skin column, not the cheeks.
-    assert neck[56, 30]
-    assert not face[56, 30]
-    assert not neck[24, 30]
+    # Chin/lower skin stays on the face while neck cut is off.
+    assert face[56, 30]
     # Eyes/mouth stay punched out of face.
     assert not face[24, 24]
     assert not face[40, 32]
-    # Green leftover is unclaimed: not face, not hair, not neck.
+    # Green leftover is unclaimed: not face, not hair.
     assert not face[30, 15]
     assert not hair[30, 15]
-    assert not neck[30, 15]
     assert report["unclaimed_px"] >= 10
 
 
@@ -141,12 +142,23 @@ def test_white_hair_loses_to_hair_seed_not_skin():
     assert face[20, 20]
 
 
+def test_cut_neck_can_still_split_when_enabled():
+    image, layers = _scene()
+    out, report = split_face_colors(image, layers, load_taxonomy(), _cfg(cut_neck=True))
+    neck = next(layer for layer in out if layer.role == "neck")
+    face = next(layer for layer in out if layer.role == "face").visible > 0
+    assert report.get("cut_neck") is True
+    assert int((neck.visible > 0).sum()) >= 40
+    assert neck.visible[56, 30]
+    assert not face[56, 30]
+
+
 def test_second_split_does_not_recut_neck():
     image, layers = _scene()
-    once, _ = split_face_colors(image, layers, load_taxonomy(), _cfg())
+    once, _ = split_face_colors(image, layers, load_taxonomy(), _cfg(cut_neck=True))
     neck = next(layer for layer in once if layer.role == "neck")
     px = int((neck.visible > 0).sum())
-    twice, report = split_face_colors(image, once, load_taxonomy(), _cfg())
+    twice, report = split_face_colors(image, once, load_taxonomy(), _cfg(cut_neck=True))
     neck2 = next(layer for layer in twice if layer.role == "neck")
     assert report.get("neck_skipped") is True
     assert int((neck2.visible > 0).sum()) == px
@@ -235,3 +247,26 @@ def test_grow_keeps_pale_highlight_near_hair():
     face = next(layer for layer in out if layer.role == "face").visible > 0
     assert report.get("skin_mode") == "grow"
     assert face[20, 16]
+
+
+def test_grow_stops_at_lineart():
+    """A dark outline between peach and pale hair should halt grow."""
+    h, w = 40, 32
+    image = np.zeros((h, w, 3), dtype=np.uint8)
+    vis = np.zeros((h, w), dtype=bool)
+    vis[8:32, 6:26] = True
+    image[8:32, 6:26] = (220, 168, 148)
+    image[8:18, 6:13] = (210, 210, 220)
+    image[8:18, 13] = (20, 16, 16)
+    eye = np.zeros((h, w), dtype=bool)
+    eye[20:24, 16:20] = True
+    layers = [
+        _layer("face", vis),
+        _layer("eye_l", eye),
+        _layer("eye_r", np.zeros((h, w), dtype=bool)),
+    ]
+    out, report = split_face_colors(image, layers, load_taxonomy(), _cfg(min_neck_px=400))
+    face = next(layer for layer in out if layer.role == "face").visible > 0
+    assert report.get("edge_stop") is True
+    assert face[24, 18]
+    assert not face[12, 8]

@@ -15,9 +15,9 @@ def split_face_colors(
 ) -> tuple[list[LayerMask], dict]:
     """Punch eyes/mouth out of face, then split leftover pixels by color.
 
-    Skin grows from cheek seeds through 3x3 neighbors (or a global Lab ball if
-    skin_mode=global). Skin above the jaw stays face. Skin below becomes neck.
-    Hair-colored leftover joins hair_front. Expand skin selections by expand_px.
+    Skin grows from cheek seeds through 3x3 neighbors and stops at Canny lineart
+    (or a global Lab ball if skin_mode=global). Hair-colored leftover joins
+    hair_front. Neck split is off unless cut_neck is true.
     """
     cfg = dict(cfg or {})
     report: dict = {"enabled": bool(cfg.get("enabled", True)), "applied": False}
@@ -45,6 +45,10 @@ def split_face_colors(
     cheek_dilate_px = int(cfg.get("cheek_dilate_px", 24))
     skin_mode = str(cfg.get("skin_mode") or "grow")
     local_dist = float(cfg.get("local_dist", 20))
+    cut_neck = bool(cfg.get("cut_neck", False))
+    edge_stop = bool(cfg.get("edge_stop", True))
+    canny_low = int(cfg.get("canny_low", 50))
+    canny_high = int(cfg.get("canny_high", 120))
 
     rgb = image[:, :, :3]
     lab = _to_lab(rgb)
@@ -76,12 +80,14 @@ def split_face_colors(
     if skin_mode == "grow":
         warm = _warm_skin(lab, remaining)
         start = (warm & cap) | (seed_mask & remaining)
-        walk = cap | punched | start
+        edges = _lineart_edges(rgb, canny_low, canny_high) if edge_stop else np.zeros_like(remaining)
+        walk = (cap | punched | start) & ~(edges & ~start)
         grown = _grow_skin(lab, walk, start, skin_seed, local_dist, l_weight)
         skin = grown & remaining
         if int(skin.sum()) < 32:
             skin = cap
         report["skin_mode"] = "grow"
+        report["edge_stop"] = bool(edge_stop)
     else:
         skin = cap
         report["skin_mode"] = "global"
@@ -89,15 +95,17 @@ def split_face_colors(
     already_neck = any(
         layer.role == neck_role and int((layer.visible > 0).sum()) >= min_neck_px for layer in layers
     )
-    if already_neck:
+    if not cut_neck or already_neck:
         jaw_y = 0
         neck = np.zeros_like(remaining)
         face_skin = skin
         report["neck_skipped"] = True
+        report["cut_neck"] = False
     else:
         jaw_y = _jaw_y(skin, layers, jaw_frac, jaw_pad_px, neck_width_frac)
         neck = _neck_from_skin(skin, jaw_y, min_neck_px)
         face_skin = skin & ~neck
+        report["cut_neck"] = True
     if expand_px > 0:
         face_skin = (dilate_mask(face_skin.astype(np.uint8) * 255, expand_px) > 0) & remaining & ~punched
         if int(neck.sum()) > 0:
@@ -173,6 +181,14 @@ def split_face_colors(
         report["unclaimed_px"] = int((unclaimed | hair).sum())
 
     return layers, report
+
+
+def _lineart_edges(rgb: np.ndarray, canny_low: int, canny_high: int) -> np.ndarray:
+    import cv2
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+    return cv2.Canny(blur, int(canny_low), int(canny_high)) > 0
 
 
 def _to_lab(rgb: np.ndarray) -> np.ndarray:
