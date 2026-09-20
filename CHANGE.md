@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 放宽生长阈值，补脸上的蛀洞
+
+- 做了：只改 `cascade.face_split` 数值。`local_dist` 16→20，`skin_dist` 18→24，`l_weight` 0.15→0.08（线稿/高光的亮度差少挡生长），`cheek_dilate_px` 12→24。新增 `hair_slack: 8`：皮肤比发色远一点仍可走（高光不再被发色一票否决）。**没改 schema、没改 .venv、没改生长算法**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（129 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/01_face.png`。a163 脸 17k→28k，嘴周蛀洞基本没了。`missing`：6 张 `[]`
+- 未做 / 已知缺陷：放宽后剥发变少——a163 hair 9.2k→13，4034 25k→16k（发缘白刺又多了），640 3.4k→0.8k（金发更沾脸）。296 蓝发仍沾。脖子仍短。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 脸肤色改成邻域区域生长
 
 - 做了：`cascade.face_split.skin_mode=grow`（`global` 可回退）。肤色不再对整张脸用「中位 Lab 球半径 18」逐像素打标；从颊侧暖色种子（以及 `cap` 里的暖色岛）做 8 连通生长，像素只在 3×3 已生长邻域的 Lab 距离 ≤ `local_dist`（16）时加入。眼/嘴 punch 当通道，避免嘴洞切断脖子。发色仍走全局 `hair_dist`。`skin_mode: global` 可回到旧逻辑。**没改 schema、没改 .venv**

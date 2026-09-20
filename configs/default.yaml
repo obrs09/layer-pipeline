@@ -31,17 +31,18 @@ cascade:
     neck_role: neck
     hair_role: hair_front
     hair_fallback: hair_back
-    l_weight: 0.15
+    l_weight: 0.08
     jaw_frac: 0.82
     jaw_pad_px: 4
     neck_width_frac: 0.62
-    skin_dist: 18
+    skin_dist: 24
     hair_dist: 24
+    hair_slack: 8
     skin_mode: grow
-    local_dist: 16
+    local_dist: 20
     min_neck_px: 64
     min_hair_px: 32
-    cheek_dilate_px: 12
+    cheek_dilate_px: 24
 
 character_qa:
   max_attempts: 3

@@ -15,17 +15,18 @@ def _cfg(**overrides) -> dict:
         "neck_role": "neck",
         "hair_role": "hair_front",
         "hair_fallback": "hair_back",
-        "skin_dist": 18,
+        "skin_dist": 24,
         "hair_dist": 24,
-        "l_weight": 0.15,
+        "hair_slack": 8,
+        "l_weight": 0.08,
         "jaw_frac": 0.82,
         "jaw_pad_px": 2,
         "neck_width_frac": 0.62,
         "min_neck_px": 40,
         "min_hair_px": 20,
-        "cheek_dilate_px": 6,
+        "cheek_dilate_px": 12,
         "skin_mode": "grow",
-        "local_dist": 16,
+        "local_dist": 20,
     }
     cfg.update(overrides)
     return cfg
@@ -209,3 +210,28 @@ def test_grow_stops_at_sharp_hair_edge():
     assert report.get("skin_mode") == "grow"
     assert face[24, 16]
     assert not face[10, 8]
+
+
+def test_grow_keeps_pale_highlight_near_hair():
+    """A peach highlight a bit closer to hair still stays face (hair_slack)."""
+    h, w = 40, 32
+    image = np.zeros((h, w, 3), dtype=np.uint8)
+    vis = np.zeros((h, w), dtype=bool)
+    vis[8:32, 6:26] = True
+    image[8:32, 6:26] = (220, 168, 148)
+    image[18:24, 12:20] = (232, 196, 186)
+    hair = np.zeros((h, w), dtype=bool)
+    hair[2:8, 6:26] = True
+    image[2:8, 6:26] = (200, 200, 210)
+    eye = np.zeros((h, w), dtype=bool)
+    eye[12:16, 12:16] = True
+    layers = [
+        _layer("face", vis),
+        _layer("eye_l", eye),
+        _layer("eye_r", np.zeros((h, w), dtype=bool)),
+        _layer("hair_front", hair),
+    ]
+    out, report = split_face_colors(image, layers, load_taxonomy(), _cfg(min_neck_px=400))
+    face = next(layer for layer in out if layer.role == "face").visible > 0
+    assert report.get("skin_mode") == "grow"
+    assert face[20, 16]

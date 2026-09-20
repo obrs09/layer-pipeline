@@ -33,17 +33,18 @@ def split_face_colors(
     hair_role = str(cfg.get("hair_role") or "hair_front")
     hair_fallback = str(cfg.get("hair_fallback") or "hair_back")
     expand_px = int(cfg.get("expand_px", 1))
-    skin_dist = float(cfg.get("skin_dist", 18))
+    skin_dist = float(cfg.get("skin_dist", 24))
     hair_dist = float(cfg.get("hair_dist", 24))
-    l_weight = float(cfg.get("l_weight", 0.15))
+    hair_slack = float(cfg.get("hair_slack", 8))
+    l_weight = float(cfg.get("l_weight", 0.08))
     jaw_frac = float(cfg.get("jaw_frac", 0.82))
     jaw_pad_px = int(cfg.get("jaw_pad_px", 4))
     neck_width_frac = float(cfg.get("neck_width_frac", 0.62))
     min_neck_px = int(cfg.get("min_neck_px", 64))
     min_hair_px = int(cfg.get("min_hair_px", 32))
-    cheek_dilate_px = int(cfg.get("cheek_dilate_px", 12))
+    cheek_dilate_px = int(cfg.get("cheek_dilate_px", 24))
     skin_mode = str(cfg.get("skin_mode") or "grow")
-    local_dist = float(cfg.get("local_dist", 16))
+    local_dist = float(cfg.get("local_dist", 20))
 
     rgb = image[:, :, :3]
     lab = _to_lab(rgb)
@@ -66,7 +67,7 @@ def split_face_colors(
     hair_seed = _hair_seed(lab, remaining, remaining & (d_skin <= skin_dist), layers, hair_role, hair_fallback)
     if hair_seed is not None:
         d_hair = _lab_dist(lab, hair_seed, l_weight)
-        cap = remaining & (d_skin <= skin_dist) & (d_skin < d_hair)
+        cap = remaining & (d_skin <= skin_dist) & (d_skin < d_hair + hair_slack)
         hair_like = remaining & (d_hair <= hair_dist) & (d_hair <= d_skin)
     else:
         cap = remaining & (d_skin <= skin_dist)
