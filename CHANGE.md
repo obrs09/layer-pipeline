@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 2.4 按切开顺序落盘；taxonomy 含头发 query
+
+- 做了：`04_segment` 文件名改成切开序号 `00_clothes` / `01_face` / …（不是 taxonomy 绘制 `order` 的 `10_hair_back`）。`cut_order.json` 记 planned vs 实际 kept。DINO 框按 `_trace_box` 顺序编号，`03_boxes/{index}_{role}.png` 单框 + `overlay.png` 全框。`layers/` `masks/` 仍用 `{order}_{role}`，**没改 schema、没改切件算法、没改 .venv**。头发在 taxonomy：`hair_back.queries=["hair","anime hair","long hair","back hair"]`，`hair_front.queries=["bangs","front hair",…]`，`_cut_one` 用这些英文 query 跑 Grounding DINO。
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`
+- 产物路径：新 run 的 `runs/flat/<uuid8>/steps/03_boxes/` 与 `steps/04_segment/`。旧 run（如 296a4352）仍是绘制序文件名，需重跑才变成切开序。
+- 未做 / 已知缺陷：没 GPU 重跑 6 张。残差头发 / body 在 SAM 循环之后，会出现在 cut_order 末尾。05_refine / 06_occlusion / 最终包仍按 taxonomy order。640 `hair_front` 仍缺。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 姿态用 DWPose wholebody，不再收成 OpenPose-18
 
 - 做了：`DwPoseEstimate` 不再把 RTMPose 133 点转成 OpenPose-18（丢掉手/脸、人造 `neck`）。overlay / `keypoints.json` / SAM 部件框走 COCO-17 + 脚/脸/手；手臂正点末位是手掌根（`lhand_00` / `rhand_00`），脸框用 68 个脸点。角色 mask 仍不被骨架裁。**没改 schema、没改 .venv**

@@ -9,7 +9,7 @@ from layerforge.backends.segment.cascade import CascadeSegment
 from layerforge.cli import expand_run_inputs
 from layerforge.config import load_config
 from layerforge.ops.trace import StepDump, masked_rgba
-from layerforge.pipeline import run_pipeline, short_job_id
+from layerforge.pipeline import _cut_ids, run_pipeline, short_job_id
 from layerforge.taxonomy import load_taxonomy
 
 
@@ -88,6 +88,13 @@ def test_pipeline_dryrun_writes_steps(tmp_path: Path):
         inpaint_name="identity",
     )
     assert (out / "steps" / "04_segment" / "overlay.png").exists()
+    assert (out / "steps" / "04_segment" / "cut_order.json").exists()
+    cut_pngs = sorted(
+        p.name
+        for p in (out / "steps" / "04_segment").glob("*.png")
+        if p.name != "overlay.png" and not p.name.endswith(".mask.png")
+    )
+    assert cut_pngs and cut_pngs[0].startswith("00_")
     assert (out / "steps" / "05_refine" / "overlay.png").exists()
     assert (out / "steps" / "06_occlusion" / "overlay.png").exists()
     assert list((out / "layers").glob("*.png"))
@@ -100,3 +107,32 @@ def test_masked_rgba_keeps_visible_rgb():
     out = masked_rgba(image, mask)
     assert tuple(out[0, 0, :3]) == (9, 8, 7)
     assert int(out[0, 1, 3]) == 0
+
+
+def test_cut_ids_follow_list_order_not_taxonomy_draw_order():
+    from layerforge.backends.segment.base import LayerMask
+
+    blank = np.zeros((2, 2), dtype=np.uint8)
+    layers = [
+        LayerMask(role="clothes", label="clothes", visible=blank, source="sam"),
+        LayerMask(role="face", label="face", visible=blank, source="sam"),
+        LayerMask(role="hair_back", label="hair_back", visible=blank, source="sam"),
+        LayerMask(role="body", label="body", visible=blank, source="residual"),
+    ]
+    assert _cut_ids(layers) == ["00_clothes", "01_face", "02_hair_back", "03_body"]
+
+
+def test_write_boxes_saves_in_trace_order(tmp_path: Path):
+    dump = StepDump(tmp_path, enabled=True)
+    dump.reset()
+    image = np.zeros((16, 20, 3), dtype=np.uint8)
+    boxes = [
+        {"role": "clothes", "query": "anime clothes", "xyxy": [1, 2, 8, 10], "score": 0.5},
+        {"role": "hair_back", "query": "hair", "xyxy": [2, 1, 12, 9], "score": 0.7},
+    ]
+    dump.write_boxes(image, boxes)
+    assert (tmp_path / "steps" / "03_boxes" / "00_clothes.png").exists()
+    assert (tmp_path / "steps" / "03_boxes" / "01_hair_back.png").exists()
+    payload = (tmp_path / "steps" / "03_boxes" / "boxes.json").read_text(encoding="utf-8")
+    assert '"index": 0' in payload
+    assert '"index": 1' in payload

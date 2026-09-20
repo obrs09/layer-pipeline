@@ -67,6 +67,7 @@ class CascadeSegment:
         self.tags: dict[str, float] = {}
         self.dump = None
         self.debug_boxes: list[dict] = []
+        self.cut_plan: list[str] = []
         self.cut_failures: list[dict] = []
         self.character_mask = None
         self.character_qa = None
@@ -85,6 +86,7 @@ class CascadeSegment:
         self.inventory = []
         self.tags = {}
         self.debug_boxes = []
+        self.cut_plan = []
         self.cut_failures = []
         self.character_mask = None
         self.character_qa = None
@@ -109,6 +111,7 @@ class CascadeSegment:
         kept: list[LayerMask] = []
         skip_pair: set[str] = set()
         ordered = self._cut_order(inventory)
+        self.cut_plan = list(ordered)
         for role in ordered:
             family = self.taxonomy.family_of_role(role)
             if family:
@@ -195,6 +198,7 @@ class CascadeSegment:
         self._dump_character(image, character)
         recut = not self.dry_run and self.sam2 is not None
         self.inventory = [part.role for part in parts]
+        self.cut_plan = list(self.inventory)
         if recut:
             self._prepare_sam2(image)
         kept: list[LayerMask] = []
@@ -788,6 +792,7 @@ class CascadeSegment:
                 break
         self.debug_boxes.append(
             {
+                "index": len(self.debug_boxes),
                 "role": role,
                 "query": query,
                 "xyxy": [round(float(v), 1) for v in box],

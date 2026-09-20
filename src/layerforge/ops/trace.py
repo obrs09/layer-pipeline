@@ -119,20 +119,31 @@ class StepDump:
     def write_boxes(self, image: np.ndarray, boxes: list[dict]) -> None:
         if not self.enabled:
             return
-        self.write_json("03_boxes/boxes.json", boxes)
+        numbered = []
+        for idx, item in enumerate(boxes):
+            row = dict(item)
+            row["index"] = int(item.get("index", idx))
+            numbered.append(row)
+        self.write_json("03_boxes/boxes.json", numbered)
         rgb = to_rgba(image)[:, :, :3].copy()
         canvas = Image.fromarray(rgb)
         draw = ImageDraw.Draw(canvas)
-        for item in boxes:
+        for item in numbered:
             xyxy = item.get("xyxy") or []
             if len(xyxy) != 4:
                 continue
             x0, y0, x1, y1 = [int(round(float(v))) for v in xyxy]
-            color = role_color(str(item.get("role") or "acc"))
+            role = str(item.get("role") or "acc")
+            color = role_color(role)
             draw.rectangle([x0, y0, x1, y1], outline=color, width=3)
-            label = str(item.get("query") or item.get("role") or "")
-            if label:
-                draw.text((x0 + 2, max(0, y0 - 12)), label[:40], fill=color)
+            query = str(item.get("query") or role)
+            label = f"{int(item['index']):02d} {query}"
+            draw.text((x0 + 2, max(0, y0 - 12)), label[:40], fill=color)
+            one = Image.fromarray(rgb.copy())
+            one_draw = ImageDraw.Draw(one)
+            one_draw.rectangle([x0, y0, x1, y1], outline=color, width=3)
+            one_draw.text((x0 + 2, max(0, y0 - 12)), label[:40], fill=color)
+            self.write_png(f"03_boxes/{int(item['index']):02d}_{role}.png", np.array(one))
         self.write_png("03_boxes/overlay.png", np.array(canvas))
 
     def write_layers(

@@ -41,6 +41,11 @@ def _layer_ids(layers, taxonomy: Taxonomy) -> list[str]:
     return ids
 
 
+def _cut_ids(layers) -> list[str]:
+    """Debug dump names: cut sequence, not taxonomy draw order."""
+    return [f"{idx:02d}_{layer.role}" for idx, layer in enumerate(layers)]
+
+
 def run_pipeline(
     input_path: str | Path,
     out_root: str | Path,
@@ -115,7 +120,18 @@ def run_pipeline(
     )
     masks = assign_roles(masks, source, taxonomy)
     log.write("roles", roles=[m.role for m in masks])
-    dump.write_layers("04_segment", source, masks, _layer_ids(masks, taxonomy))
+    cut_ids = _cut_ids(masks)
+    dump.write_layers("04_segment", source, masks, cut_ids)
+    dump.write_json(
+        "04_segment/cut_order.json",
+        {
+            "planned": list(getattr(segment, "cut_plan", []) or []),
+            "kept": [
+                {"index": idx, "id": cut_ids[idx], "role": layer.role, "notes": layer.notes}
+                for idx, layer in enumerate(masks)
+            ],
+        },
+    )
     domain = getattr(segment, "character_mask", None)
     refine_cfg = cfg.get("refine") or {}
     masks = refine_masks(
