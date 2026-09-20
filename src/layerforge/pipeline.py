@@ -16,7 +16,14 @@ from layerforge.logutil import RunLog, write_tags_json
 from layerforge.ops.assign_roles import assign_roles
 from layerforge.ops.normalize import resize_max_side, to_rgba
 from layerforge.ops.occlusion import plan_occlusion
-from layerforge.ops.refine import assign_residual_to_body, assign_unclaimed_seams, refine_masks
+from layerforge.ops.occlusion import occluded_over_lower_visible
+from layerforge.ops.refine import (
+    assign_residual_to_body,
+    assign_unclaimed_seams,
+    fill_unclaimed_domain,
+    refine_masks,
+    unclaimed_in_domain,
+)
 from layerforge.ops.reproject import reproject
 from layerforge.ops.trace import StepDump
 from layerforge.taxonomy import Taxonomy, load_taxonomy
@@ -136,6 +143,23 @@ def run_pipeline(
         max_dist=float(refine_cfg.get("seam_fill_px", 24)),
         domain=domain,
     )
+    if domain is not None:
+        background_luma = int((cfg.get("occlusion") or {}).get("background_luma", 250))
+        before = unclaimed_in_domain(masks, domain, taxonomy, source, background_luma)
+        if before.any():
+            dump.write_png("05_refine/unclaimed.png", before.astype(np.uint8) * 255)
+        masks, coverage = fill_unclaimed_domain(
+            masks,
+            domain,
+            taxonomy,
+            source,
+            background_luma=background_luma,
+            min_area=int(refine_cfg.get("min_area", 64)),
+            max_dist=float(refine_cfg.get("seam_fill_px", 24)),
+        )
+        uncovered = unclaimed_in_domain(masks, domain, taxonomy)
+        coverage["character_uncovered_px"] = int(uncovered.sum())
+        log.write("coverage", **coverage)
     log.write("refine", count=len(masks))
     ids = _layer_ids(masks, taxonomy)
     dump.write_layers("05_refine", source, masks, ids)
@@ -146,6 +170,12 @@ def run_pipeline(
         background_luma=int((cfg.get("occlusion") or {}).get("background_luma", 250)),
         seam_dilate_px=int((cfg.get("inpaint") or {}).get("seam_dilate_px", 2)),
     )
+    overlap = occluded_over_lower_visible(masks, occ_map, taxonomy)
+    if overlap:
+        raise RuntimeError(
+            f"occlusion plan puts {overlap} hole pixels on a lower layer's visible pixels"
+        )
+    log.write("occlusion", holes=sum(int((m > 0).sum()) for m in occ_map.values()), over_lower_visible=overlap)
     dump.write_layers("06_occlusion", source, masks, ids, occluded=occ_map)
 
     layers_rgba: dict[str, np.ndarray] = {}

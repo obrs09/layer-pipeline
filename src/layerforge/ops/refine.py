@@ -173,6 +173,133 @@ def assign_residual_to_body(
     return layers
 
 
+def unclaimed_in_domain(
+    layers: list[LayerMask],
+    domain: np.ndarray,
+    taxonomy: Taxonomy,
+    source: np.ndarray | None = None,
+    background_luma: int = 250,
+) -> np.ndarray:
+    """Character pixels no non-overlay layer owns. Overlay sprites do not count as cover."""
+    want = domain > 0
+    if source is not None:
+        want &= foreground_mask(source, background_luma) > 0
+    claimed = np.zeros(want.shape, dtype=bool)
+    for layer in layers:
+        if taxonomy.spec(layer.role).overlay:
+            continue
+        claimed |= layer.visible > 0
+    return want & ~claimed
+
+
+def fill_unclaimed_domain(
+    layers: list[LayerMask],
+    domain: np.ndarray,
+    taxonomy: Taxonomy,
+    source: np.ndarray | None = None,
+    background_luma: int = 250,
+    min_area: int = 64,
+    max_dist: float = 24.0,
+) -> tuple[list[LayerMask], dict]:
+    """Every character pixel ends up in a non-overlay layer so the stack has no holes.
+
+    Thin leftovers (never farther than max_dist from a layer) join the nearest
+    non-overlay layer, like seam fill. Anything with real interior becomes body:
+    unclaimed flesh, hands, or hair the detectors missed. Returns (layers, report).
+    """
+    import cv2
+
+    residual = unclaimed_in_domain(layers, domain, taxonomy, source, background_luma)
+    domain_px = int((domain > 0).sum())
+    report: dict = {
+        "domain_px": domain_px,
+        "hole_px_before": int(residual.sum()),
+        "seam_px": 0,
+        "body_px": 0,
+        "blobs": [],
+    }
+    if not residual.any():
+        report["hole_px_after"] = 0
+        report["hole_frac_after"] = 0.0
+        return layers, report
+
+    candidates = [idx for idx, layer in enumerate(layers) if not taxonomy.spec(layer.role).overlay]
+    claimed = np.zeros(residual.shape, dtype=bool)
+    for idx in candidates:
+        claimed |= layers[idx].visible > 0
+    if claimed.any():
+        dist_claimed = cv2.distanceTransform((~claimed).astype(np.uint8), cv2.DIST_L2, 5)
+    else:
+        dist_claimed = np.full(residual.shape, np.inf, dtype=np.float32)
+
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(residual.astype(np.uint8), connectivity=8)
+    seam = np.zeros(residual.shape, dtype=bool)
+    blob = np.zeros(residual.shape, dtype=bool)
+    for k in range(1, n):
+        comp = labels == k
+        area = int(stats[k, cv2.CC_STAT_AREA])
+        depth = float(dist_claimed[comp].max())
+        if area >= min_area and depth > float(max_dist):
+            blob |= comp
+            x, y, w, h = (int(v) for v in stats[k, :4])
+            report["blobs"].append({"area": area, "bbox": [x, y, w, h], "depth_px": round(depth, 1)})
+        else:
+            seam |= comp
+
+    if seam.any():
+        if candidates:
+            best_d = np.full(residual.shape, np.inf, dtype=np.float32)
+            best_i = np.full(residual.shape, -1, dtype=np.int32)
+            for idx in candidates:
+                inv = np.ones(residual.shape, dtype=np.uint8)
+                inv[layers[idx].visible > 0] = 0
+                dist = cv2.distanceTransform(inv, cv2.DIST_L2, 5)
+                better = dist < best_d
+                best_d[better] = dist[better]
+                best_i[better] = idx
+            for idx in candidates:
+                add = seam & (best_i == idx)
+                if not add.any():
+                    continue
+                layers[idx].visible = ((layers[idx].visible > 0) | add).astype(np.uint8) * 255
+                layers[idx].notes = _join(layers[idx].notes, "seam filled")
+            report["seam_px"] = int(seam.sum())
+        else:
+            blob |= seam
+
+    if blob.any():
+        bodies = [layer for layer in layers if layer.role == "body"]
+        if bodies:
+            target = max(bodies, key=lambda m: int((m.visible > 0).sum()))
+            target.visible = ((target.visible > 0) | blob).astype(np.uint8) * 255
+            target.notes = _join(target.notes, "unclaimed character pixels folded into body")
+        else:
+            layers.append(
+                LayerMask(
+                    role="body",
+                    label="unclaimed",
+                    visible=blob.astype(np.uint8) * 255,
+                    source="silhouette",
+                    notes="unclaimed character pixels; no body layer was cut",
+                )
+            )
+            layers.sort(key=lambda m: (taxonomy.spec(m.role).order, -int((m.visible > 0).sum())))
+        report["body_px"] = int(blob.sum())
+
+    after = unclaimed_in_domain(layers, domain, taxonomy, source, background_luma)
+    report["hole_px_after"] = int(after.sum())
+    report["hole_frac_after"] = float(after.sum() / max(1, domain_px))
+    return layers, report
+
+
+def _join(notes: str, extra: str) -> str:
+    if not notes:
+        return extra
+    if extra in notes:
+        return notes
+    return f"{notes}; {extra}"
+
+
 def assign_unclaimed_seams(
     layers: list[LayerMask],
     source: np.ndarray,

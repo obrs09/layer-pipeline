@@ -3,7 +3,13 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask
-from layerforge.ops.refine import assign_residual_to_body, assign_unclaimed_seams, refine_masks
+from layerforge.ops.refine import (
+    assign_residual_to_body,
+    assign_unclaimed_seams,
+    fill_unclaimed_domain,
+    refine_masks,
+    unclaimed_in_domain,
+)
 from layerforge.taxonomy import load_taxonomy
 
 
@@ -108,6 +114,96 @@ def test_mutex_face_wins_over_hair_back():
     by_role = {layer.role: layer for layer in out}
     assert int((by_role["face"].visible > 0).sum()) == 12 * 12
     assert int((by_role["hair_back"].visible > 0).sum()) == 20 * 20 - 12 * 12
+
+
+def _character(h: int = 96, w: int = 80) -> np.ndarray:
+    domain = np.zeros((h, w), dtype=np.uint8)
+    domain[4:92, 8:72] = 255
+    return domain
+
+
+def _hole_frac(layers, domain, source=None) -> float:
+    hole = unclaimed_in_domain(layers, domain, load_taxonomy(), source)
+    return float(hole.sum() / max(1, int((domain > 0).sum())))
+
+
+def test_unclaimed_legs_become_body():
+    """a1639e70: body kept a waist band; the legs below were in no layer."""
+    domain = _character()
+    source = np.full((96, 80, 3), 40, dtype=np.uint8)
+    clothes = LayerMask(role="clothes", label="clothes", visible=np.zeros_like(domain), source="sam")
+    clothes.visible[4:50, 8:72] = 255
+    body = LayerMask(role="body", label="body", visible=np.zeros_like(domain), source="sam")
+    body.visible[50:58, 8:72] = 255
+    assert _hole_frac([clothes, body], domain) > 0.3
+    layers, report = fill_unclaimed_domain([clothes, body], domain, load_taxonomy(), source, max_dist=8)
+    assert _hole_frac(layers, domain) == 0.0
+    assert report["hole_px_after"] == 0
+    assert report["body_px"] > 0
+    assert report["blobs"]
+    by_role = {layer.role: layer for layer in layers}
+    assert int(by_role["body"].visible[80, 40]) == 255
+    assert int(by_role["clothes"].visible[80, 40]) == 0
+    assert "folded into body" in by_role["body"].notes
+
+
+def test_unclaimed_thin_gap_joins_nearest_layer_not_body():
+    domain = _character()
+    source = np.full((96, 80, 3), 40, dtype=np.uint8)
+    hair = LayerMask(role="hair_front", label="hair", visible=np.zeros_like(domain), source="sam")
+    hair.visible[4:30, 8:72] = 255
+    body = LayerMask(role="body", label="body", visible=np.zeros_like(domain), source="sam")
+    body.visible[34:92, 8:72] = 255
+    layers, report = fill_unclaimed_domain([hair, body], domain, load_taxonomy(), source, max_dist=8)
+    assert report["hole_px_after"] == 0
+    assert report["body_px"] == 0
+    assert report["seam_px"] == 4 * 64
+    assert _hole_frac(layers, domain) == 0.0
+    assert len(layers) == 2
+    assert "seam filled" in hair.notes or "seam filled" in body.notes
+
+
+def test_unclaimed_blob_creates_body_when_none_was_cut():
+    """64010c19: hair the detectors missed must not vanish from the stack."""
+    domain = _character()
+    source = np.full((96, 80, 3), 40, dtype=np.uint8)
+    clothes = LayerMask(role="clothes", label="clothes", visible=np.zeros_like(domain), source="sam")
+    clothes.visible[40:92, 8:72] = 255
+    face = LayerMask(role="face", label="face", visible=np.zeros_like(domain), source="sam")
+    face.visible[16:40, 24:56] = 255
+    layers, report = fill_unclaimed_domain([clothes, face], domain, load_taxonomy(), source, max_dist=8)
+    assert _hole_frac(layers, domain) == 0.0
+    roles = [layer.role for layer in layers]
+    assert roles == ["body", "clothes", "face"]
+    body = layers[0]
+    assert body.source == "silhouette"
+    assert int(body.visible[8, 40]) == 255
+    assert not np.any((body.visible > 0) & (domain == 0))
+
+
+def test_overlay_layers_do_not_count_as_cover():
+    domain = _character()
+    source = np.full((96, 80, 3), 40, dtype=np.uint8)
+    body = LayerMask(role="body", label="body", visible=domain.copy(), source="sam")
+    body.visible[40:60, 20:60] = 0
+    acc = LayerMask(role="acc", label="acc", visible=np.zeros_like(domain), source="sam")
+    acc.visible[40:60, 20:60] = 255
+    assert _hole_frac([body, acc], domain) > 0.0
+    layers, report = fill_unclaimed_domain([body, acc], domain, load_taxonomy(), source, max_dist=4)
+    assert report["hole_px_after"] == 0
+    assert int(layers[0].visible[50, 40]) == 255
+    assert layers[0].role == "body"
+
+
+def test_fill_never_leaves_the_character_domain():
+    domain = _character()
+    source = np.full((96, 80, 3), 40, dtype=np.uint8)
+    body = LayerMask(role="body", label="body", visible=np.zeros_like(domain), source="sam")
+    body.visible[40:60, 20:60] = 255
+    layers, _ = fill_unclaimed_domain([body], domain, load_taxonomy(), source, max_dist=8)
+    for layer in layers:
+        assert not np.any((layer.visible > 0) & (domain == 0))
+    assert _hole_frac(layers, domain) == 0.0
 
 
 def test_morph_open_drops_one_pixel_rim():

@@ -83,6 +83,20 @@ class Taxonomy:
         return None
 
 
+def _check_occluders_sit_above(roles: dict[str, RoleSpec]) -> None:
+    """A layer can only be completed under layers that composite above it."""
+    for role in roles.values():
+        for other in role.occluded_by:
+            occluder = roles.get(other)
+            if occluder is None:
+                raise ValueError(f"taxonomy: {role.name}.occluded_by lists unknown role {other!r}")
+            if occluder.order <= role.order:
+                raise ValueError(
+                    f"taxonomy: {role.name} (order {role.order}) cannot be occluded_by "
+                    f"{other} (order {occluder.order}); occluders must have a higher order"
+                )
+
+
 def _norm(text: str) -> str:
     return text.strip().lower().replace("_", "-")
 
@@ -126,6 +140,7 @@ def load_taxonomy(path: str | Path | None = None) -> Taxonomy:
         alias_to_role[_norm(name)] = name
         for alias in role.aliases:
             alias_to_role.setdefault(_norm(alias), name)
+    _check_occluders_sit_above(roles)
     pair_roles = {
         family: (pair[0], pair[1])
         for family, pair in (raw.get("pair_roles") or {}).items()

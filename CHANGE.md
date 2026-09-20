@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 修 Reviewer BLOCKER：occluded 不压低层可见区；角色 mask 不留洞
+
+- 做了：（1）`taxonomy.yaml` 里 `clothes.occluded_by` 去掉 `arm_l/arm_r`（arm order 25/26 在 clothes 40 之下）；`load_taxonomy` 校验 occluder 的 order 必须高于被遮挡层，否则报错；`plan_occlusion` 只认更高 order 的 occluder，且 hole 永不落在任何更低 order 层的 visible 上，pipeline 对结果再断言一次（`occluded_over_lower_visible == 0`）。（2）refine 末尾加 `fill_unclaimed_domain`：角色 mask 内没被非 overlay 层认领的像素——薄缝（离已有层 ≤ `seam_fill_px`）归最近层，成块的进 body（没 body 层就新建）；`logs/run.jsonl` 多一条 `coverage`，填之前的洞落 `steps/05_refine/unclaimed.png`。新增 `tests/test_taxonomy.py`、occlusion/refine 契约测试，102 passed。**没改 schema、没改 .venv、只修 BLOCKERS**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest` ；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/`。6 张 `preview/diff.png` 全黑（nonzero=0），`mask_occluded ∩ 更低层 mask_visible` 全部为 0。角色 mask 未覆盖像素：296 / 640 / 908 = 0；4034 / 458 / a163 = 66 / 42 / 63 px（角色 mask 里亮度 ≥250 且连到边框的像素，被 luma 前景排除，边级别）。a1639e70 小腿+胸口回到 `20_body`（41009 → 101890 px）；64010c19 漏检的头发进了 body（仍 `missing=[hair_back, hair_front]`）；296a4352 手+手机进了 body。`missing` 不变：296 `[eye_l, eye_r]`，4034 `[eye_r]`，640 `[hair_back, hair_front]`，其余 `[]`
+- 未做 / 已知缺陷：296 的手机现在算 body（没有检测器说它是 acc）。640 头发在 body 里不是 hair 层。NITs 未动：peer_and 吃掉半透明发梢、QA 失败仍跑三次 isnet、`structural_score` 覆盖 Dice 原因、`layer-qa-review/SKILL.md` 仍写 v1、`runs/flat/7d9f70f9` 旧产物未删。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 旁路更好时改用 ToonOut∩MODNet
 
 - 做了：第一步仍先跑 isnet（可换 seed 三次）。若 ToonOut/MODNet 彼此更一致、或 isnet 明显多包了一块（旁路几乎是 isnet 的子集且多出来 ≥10%），角色 mask 改用两个旁路的交集；交集太小则取结构更好的那个。原 isnet 落到 `01_character/isnet.png`。**没改 schema、没改 .venv**
