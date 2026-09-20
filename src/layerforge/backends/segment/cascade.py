@@ -57,6 +57,10 @@ class CascadeSegment:
         refine_cfg = cfg.get("refine") or {}
         self.morph_open_px = int(refine_cfg.get("morph_open_px", 2))
         self.hair_reach = float(cascade_cfg.get("hair_reach", 0.6))
+        self.hair_punch_pose_roles = tuple(
+            cascade_cfg.get("hair_punch_pose_roles") or ("arm_l", "arm_r")
+        )
+        self.hair_punch_pose_pad = int(cascade_cfg.get("hair_punch_pose_pad", 48))
         self.missing: list[str] = []
         self.needs_click: list[str] = []
         self.inventory: list[str] = []
@@ -615,8 +619,10 @@ class CascadeSegment:
         """Hair the detectors wanted but SAM could not cut: leftover character pixels around the head.
 
         Only runs when a hair role is in the inventory and no hair layer exists. Keeps
-        residual components that touch the head zone (face grown by hair_reach) or sit
-        inside a traced hair box. Everything else stays for the body residual.
+        residual components that touch the head zone (face grown by hair_reach). Hair
+        DINO boxes only clip the search region so long strands can be considered;
+        sitting inside a box is not enough (a staff centroid in a hair box is not hair).
+        Pose arm boxes punch held props out of the leftover blob before components run.
         """
         have = {layer.role for layer in others}
         wanted = [
@@ -643,6 +649,7 @@ class CascadeSegment:
                 continue
             claimed |= layer.visible > 0
         residual = morph_open(((character > 0) & ~claimed).astype(np.uint8) * 255, self.morph_open_px) > 0
+        residual &= ~self._pose_hair_punch(character.shape)
         if not residual.any():
             return None
         head_zone = np.zeros(character.shape, dtype=bool)
@@ -650,8 +657,8 @@ class CascadeSegment:
             _x, _y, _w, face_h = face.bbox
             reach = max(8, int(round(face_h * self.hair_reach)))
             head_zone |= dilate_mask(face.visible, reach) > 0
-        # Hair lives around the head or inside a traced hair box. Clip first so a thin
-        # unclaimed rim along the silhouette cannot chain a staff or hem onto the hair.
+        # Clip to the head halo plus traced hair boxes so a hem rim cannot chain in.
+        # Boxes do not grant membership: a staff inside a hair box still needs to touch the head.
         region = head_zone.copy()
         h, w = character.shape
         for x0, y0, x1, y1 in hair_boxes:
@@ -662,7 +669,7 @@ class CascadeSegment:
         candidate = residual & region
         import cv2
 
-        n, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        n, labels, stats, _centroids = cv2.connectedComponentsWithStats(
             candidate.astype(np.uint8), connectivity=8
         )
         hair = np.zeros(character.shape, dtype=bool)
@@ -672,10 +679,7 @@ class CascadeSegment:
             if area < max(64, int(0.002 * char_area)):
                 continue
             comp = labels == k
-            touches_head = bool((comp & head_zone).any())
-            cx, cy = centroids[k]
-            in_box = any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in hair_boxes)
-            if touches_head or in_box:
+            if (comp & head_zone).any():
                 hair |= comp
         if int(hair.sum()) < 64:
             return None
@@ -684,6 +688,23 @@ class CascadeSegment:
             self._record_failure("hair_back", ["residual", *result.reasons])
             return None
         return _layer("hair_back", result.mask, 0.5, "character residual around head; SAM hair cut failed")
+
+    def _pose_hair_punch(self, shape: tuple[int, int]) -> np.ndarray:
+        """Wrist discs only. Full arm boxes swallow long hair (640 arm_l covers the right stream)."""
+        h, w = shape
+        punch = np.zeros((h, w), dtype=bool)
+        r = max(8, self.hair_punch_pose_pad)
+        for role in self.hair_punch_pose_roles:
+            pts = list(self.pose_points.get(role) or [])
+            if not pts:
+                continue
+            x, y = pts[-1]
+            cx, cy = int(round(x)), int(round(y))
+            x0, y0 = max(0, cx - r), max(0, cy - r)
+            x1, y1 = min(w, cx + r + 1), min(h, cy + r + 1)
+            if x1 > x0 and y1 > y0:
+                punch[y0:y1, x0:x1] = True
+        return punch
 
     def _body_from_residual(
         self,

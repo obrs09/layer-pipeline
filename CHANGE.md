@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 修 BLOCKER：残差头发不再收手杖
+
+- 做了：`_hair_from_residual` 不再把「质心落在 DINO 头发框里」当成头发。头发框只裁搜索区，连通块必须贴着脸（脸高×`hair_reach`）。手腕点从残差里挖掉（`cascade.hair_punch_pose_roles` / `hair_punch_pose_pad` 48px，YAML），把手杖从贴头的那坨拆开。不用整条手臂框——640 的 `arm_l` 框会把右侧长发一起切掉。测试覆盖「框内孤立手杖」和「经手腕走廊粘上的手杖」。**没改 schema、没改 .venv、只修 BLOCKER**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（116 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/`。640 `masks/10_hair_back.png` 无手杖（68408px，头发+耳罩+一点领口皮草）；手杖/手套在 `20_body`。`hair∩body=0`。458 hair_back 94644、clothes 204950（`hair∩clothes=0`）。`missing`：640 `[hair_front]`，其余 `[]`。6 张 diff 全黑、occluded 不压低层、hole ≤63（296=0，908=1，458=31，4034=61，a163=63）
+- 未做 / 已知缺陷：640 `hair_front` 仍缺（刘海在 face）；手杖仍在 body（acc staff `too_large:0.877`）；hair_back 仍带耳罩和领口皮草，不是「只含头发」。458 残差头发仍带肩甲/打火机边。a163 `10_hair_back` 可见 139px。296 手机下半仍在 body。908 `arm_l` 仍切不出。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 清已知缺陷：眼睛、640 头发、手机、发梢、NITs
 
 - 做了：（1）眼睛 `min_box_cover` 0.5→0.4：DINO 眼框含眉/眼皮，低垂的眼 SAM mask 只盖 0.45–0.49，看过 mask 是完整的眼。（2）`hair_back.exclude_roles` 加 `clothes`：SAM 在衣服上有负点、overlap 校验生效，458 的头发不再把外套一起吐出来。（3）`_hair_from_residual`：tagger 说有头发但 SAM 切不出时，用角色残差里「贴着脸（脸高×`hair_reach` 0.6）或落在 DINO 头发框内」的块当 `hair_back`；候选先裁到该区域，且丢掉覆盖角色 >55% 的框，免得手杖/下摆沿着轮廓细缝连进来。（4）taxonomy 新增 `tag_queries`：acc 只在 WDTagger 看到 phone/staff 时才加 smartphone/staff query；acc 的通用 query 也只在饰品 tag 触发时跑（否则 296 肩膀被当 ribbon）。acc 的 `box_cover` 按 框∩角色 算（`box_cover_in_character`，只对 acc；对 face 开会把脖子吃进脸）。（5）peer_and 之后沿边回收 isnet 灰区（P≤0.85、12px 内、且和主体连通）的发梢；AND 结果先清 <200px 碎点。（6）两旁路彼此一致且 isnet 差得远（Dice 缺口 >0.05）时不再换 seed 重试，qa.json 记 `skipped_retries`。（7）peer_and 结构回退时保留 Dice 原因（`dice_reasons`）。（8）内部熵阈值 0.05→0.08：640 卡在 0.0499/0.0500 两次跑结果不同。（9）skill 文档改 v2（`.cursor/` 不进 git）；删了 `runs/flat/7d9f70f9`。途中抓到一个自己引入的 bug：回收发梢带来孤岛让 peer_and 结构校验失败、替换被放弃，908 的 body 吞了整张床——已修（只回收连通像素，失败退回未回收 mask）。**没改 schema、没改 .venv**

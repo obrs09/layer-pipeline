@@ -397,6 +397,41 @@ def test_hair_from_residual_not_used_without_hair_in_inventory():
     assert cascade._hair_from_residual(character, [face, existing]) is None
 
 
+def test_hair_from_residual_ignores_staff_centroid_in_hair_box():
+    """64010c19: a mid-size DINO hair box can cover the staff; centroid-in-box is not hair."""
+    h, w = 160, 220
+    character = _blob(h, w, 10, 90, 150, 210)
+    character[20:70, 16:55] = 255
+    face = LayerMask(role="face", label="face", visible=_blob(h, w, 30, 120, 70, 170), source="sam")
+    clothes = LayerMask(role="clothes", label="clothes", visible=_blob(h, w, 70, 90, 150, 190), source="sam")
+    cascade = CascadeSegment({"refine": {"morph_open_px": 0}}, load_taxonomy(), character=_Cut())
+    cascade.inventory = ["face", "clothes", "hair_back", "body"]
+    cascade.debug_boxes = [{"role": "hair_back", "query": "hair", "xyxy": [16.0, 10.0, 200.0, 80.0], "score": 0.6}]
+    hair = cascade._hair_from_residual(character, [face, clothes])
+    assert hair is not None
+    assert int(hair.visible[40, 100]) == 255
+    assert int((hair.visible[20:70, 16:55] > 0).sum()) == 0
+
+
+def test_hair_from_residual_pose_arms_split_held_staff():
+    """Staff glued to leftover hair through the arm is punched by pose arm boxes."""
+    h, w = 160, 220
+    character = _blob(h, w, 10, 90, 150, 210)
+    character[20:70, 16:40] = 255
+    character[40:55, 40:120] = 255
+    face = LayerMask(role="face", label="face", visible=_blob(h, w, 30, 120, 70, 170), source="sam")
+    clothes = LayerMask(role="clothes", label="clothes", visible=_blob(h, w, 70, 110, 150, 190), source="sam")
+    cascade = CascadeSegment({"refine": {"morph_open_px": 0}}, load_taxonomy(), character=_Cut())
+    cascade.inventory = ["face", "clothes", "hair_back", "body"]
+    cascade.debug_boxes = [{"role": "hair_back", "query": "hair", "xyxy": [16.0, 10.0, 200.0, 90.0], "score": 0.67}]
+    cascade.pose_points = {"arm_r": [(80.0, 48.0)]}
+    hair = cascade._hair_from_residual(character, [face, clothes])
+    assert hair is not None
+    assert int(hair.visible[40, 180]) == 255
+    assert int((hair.visible[20:70, 16:40] > 0).sum()) == 0
+    assert int((hair.visible[40:55, 40:90] > 0).sum()) == 0
+
+
 def test_hair_from_residual_leaves_far_blobs_for_body():
     h, w = 200, 160
     character = _blob(h, w, 10, 20, 190, 140)

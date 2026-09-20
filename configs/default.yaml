@@ -20,6 +20,9 @@ cascade:
   tag_threshold: 0.35
   character_size: 1024
   hair_reach: 0.6
+  # Residual hair must touch the head zone. Wrist discs split held props off that blob.
+  hair_punch_pose_roles: [arm_l, arm_r]
+  hair_punch_pose_pad: 48
 
 character_qa:
   max_attempts: 3
