@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 脸选区膨胀 1px，并修拆脸逻辑
+
+- 做了：`cascade.face_split.expand_px` 3→1。顺手修逻辑：（1）肤色种子排除已有头发层，并偏向 Lab a≥132 的暖色，避免刘海把皮肤中心拉白；（2）发色固定进 `hair_front`，不再因为 kept 里只有 `hair_back` 就把刘海塞进后发，切出后从 missing 拿掉；（3）refine 第二次拆脸若已有 neck 就不再按下巴重切；（4）脖子收窄相对整张脸最宽处，不相对嘴下局部峰值。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（126 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/01_face.png`、`face_split.json`。4034 剥发 18k→25k；a163 0.6k→9k。`missing`：6 张都是 `[]`（640 原先 `[hair_front]`，脸上剥下的刘海建成了 `hair_front`）
+- 未做 / 已知缺陷：4034 / a163 脸缘仍有白发线稿。296 蓝发还沾一点。脖子仍是下巴下一小条。颜色对不上的像素仍可能被 fill 折进 body。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 脸切完后按颜色拆脸 / 脖子 / 头发
 
 - 做了：切完 face + eyes + mouth 后 `split_face_colors`：从脸上扣掉眼/嘴，Lab 就近分成肤色/发色/其他；肤色用宽度收窄找下巴，脖子写成 taxonomy `neck`（order 22，不进 DINO 库存）；发色并进 `hair_front`（没有则 `hair_back`）；选区膨胀 `expand_px=3`。refine 的 fill 不再把眼/嘴 overlay 洞填回脸，并在 fill 后再拆一次，免得 seam 把头发贴回去。配置在 `cascade.face_split`。**没改 schema、没改 .venv**

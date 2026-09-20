@@ -10,7 +10,7 @@ from layerforge.taxonomy import load_taxonomy
 def _cfg(**overrides) -> dict:
     cfg = {
         "enabled": True,
-        "expand_px": 2,
+        "expand_px": 1,
         "punch_roles": ["eye_l", "eye_r", "mouth"],
         "neck_role": "neck",
         "hair_role": "hair_front",
@@ -136,3 +136,28 @@ def test_white_hair_loses_to_hair_seed_not_skin():
     assert not face[10, 10]
     assert hair[10, 10]
     assert face[20, 20]
+
+
+def test_second_split_does_not_recut_neck():
+    image, layers = _scene()
+    once, _ = split_face_colors(image, layers, load_taxonomy(), _cfg())
+    neck = next(layer for layer in once if layer.role == "neck")
+    px = int((neck.visible > 0).sum())
+    twice, report = split_face_colors(image, once, load_taxonomy(), _cfg())
+    neck2 = next(layer for layer in twice if layer.role == "neck")
+    assert report.get("neck_skipped") is True
+    assert int((neck2.visible > 0).sum()) == px
+
+
+def test_bangs_prefer_hair_front_even_if_hair_back_exists():
+    image, layers = _scene()
+    layers = [layer for layer in layers if layer.role != "hair_front"]
+    back = np.zeros(image.shape[:2], dtype=bool)
+    back[70:78, 20:40] = True
+    image[70:78, 20:40] = (190, 195, 215)
+    layers.append(_layer("hair_back", back))
+    out, report = split_face_colors(image, layers, load_taxonomy(), _cfg())
+    assert report.get("hair_role") == "hair_front"
+    front = next(layer for layer in out if layer.role == "hair_front")
+    assert int((front.visible > 0).sum()) >= 20
+    assert front.visible[12, 16]

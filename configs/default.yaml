@@ -26,7 +26,7 @@ cascade:
   # After face + eyes + mouth: punch overlays, split remaining by color.
   face_split:
     enabled: true
-    expand_px: 3
+    expand_px: 1
     punch_roles: [eye_l, eye_r, mouth]
     neck_role: neck
     hair_role: hair_front

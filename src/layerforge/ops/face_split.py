@@ -17,7 +17,7 @@ def split_face_colors(
 
     Skin above the jaw stays face. Skin below becomes neck. Hair-colored leftover
     joins hair_front (else hair_back). Anything else is dropped so later stages
-    treat it as unclaimed. Expand skin selections by expand_px before the hair grab.
+    treat it as unclaimed. Expand skin selections by expand_px (1px) before the hair grab.
     """
     cfg = dict(cfg or {})
     report: dict = {"enabled": bool(cfg.get("enabled", True)), "applied": False}
@@ -32,7 +32,7 @@ def split_face_colors(
     neck_role = str(cfg.get("neck_role") or "neck")
     hair_role = str(cfg.get("hair_role") or "hair_front")
     hair_fallback = str(cfg.get("hair_fallback") or "hair_back")
-    expand_px = int(cfg.get("expand_px", 3))
+    expand_px = int(cfg.get("expand_px", 1))
     skin_dist = float(cfg.get("skin_dist", 18))
     hair_dist = float(cfg.get("hair_dist", 24))
     l_weight = float(cfg.get("l_weight", 0.15))
@@ -55,7 +55,9 @@ def split_face_colors(
         report["applied"] = True
         return layers, report
 
-    skin_seed = _skin_seed(lab, remaining, layers, punch_roles, cheek_dilate_px)
+    skin_seed = _skin_seed(
+        lab, remaining, layers, punch_roles, cheek_dilate_px, [hair_role, hair_fallback]
+    )
     if skin_seed is None:
         return layers, report
     d_skin = _lab_dist(lab, skin_seed, l_weight)
@@ -68,9 +70,18 @@ def split_face_colors(
         skin = remaining & (d_skin <= skin_dist)
         hair_like = np.zeros_like(remaining)
 
-    jaw_y = _jaw_y(skin, layers, jaw_frac, jaw_pad_px, neck_width_frac)
-    neck = _neck_from_skin(skin, jaw_y, min_neck_px)
-    face_skin = skin & ~neck
+    already_neck = any(
+        layer.role == neck_role and int((layer.visible > 0).sum()) >= min_neck_px for layer in layers
+    )
+    if already_neck:
+        jaw_y = 0
+        neck = np.zeros_like(remaining)
+        face_skin = skin
+        report["neck_skipped"] = True
+    else:
+        jaw_y = _jaw_y(skin, layers, jaw_frac, jaw_pad_px, neck_width_frac)
+        neck = _neck_from_skin(skin, jaw_y, min_neck_px)
+        face_skin = skin & ~neck
     if expand_px > 0:
         face_skin = (dilate_mask(face_skin.astype(np.uint8) * 255, expand_px) > 0) & remaining & ~punched
         if int(neck.sum()) > 0:
@@ -186,14 +197,19 @@ def _skin_seed(
     layers: list[LayerMask],
     punch_roles: list[str],
     cheek_dilate_px: int,
+    hair_roles: list[str],
 ) -> np.ndarray | None:
+    hair = _union_roles(layers, hair_roles)
+    keep = remaining & ~hair
     eyes = _union_roles(layers, [role for role in punch_roles if role.startswith("eye")])
     if eyes.any() and cheek_dilate_px > 0:
-        band = (dilate_mask(eyes.astype(np.uint8) * 255, cheek_dilate_px) > 0) & remaining & ~eyes
-        seed = _median_lab(lab, band)
+        band = (dilate_mask(eyes.astype(np.uint8) * 255, cheek_dilate_px) > 0) & keep & ~eyes
+        seed = _median_lab(lab, _warm_skin(lab, band))
         if seed is not None:
             return seed
-    ys, xs = np.where(remaining)
+    ys, xs = np.where(keep)
+    if ys.size == 0:
+        ys, xs = np.where(remaining)
     if ys.size == 0:
         return None
     y0, y1 = int(ys.min()), int(ys.max())
@@ -203,8 +219,21 @@ def _skin_seed(
     cx0 = x0 + int(0.25 * max(1, x1 - x0))
     cx1 = x0 + int(0.75 * max(1, x1 - x0))
     center = np.zeros_like(remaining)
-    center[cy0:cy1, cx0:cx1] = remaining[cy0:cy1, cx0:cx1]
-    return _median_lab(lab, center if center.any() else remaining)
+    center[cy0:cy1, cx0:cx1] = keep[cy0:cy1, cx0:cx1]
+    sample = center if center.any() else keep
+    if not sample.any():
+        sample = remaining
+    return _median_lab(lab, _warm_skin(lab, sample))
+
+
+def _warm_skin(lab: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """OpenCV Lab a≈128 is gray; anime skin sits on the red side. Drop bangs from the seed."""
+    if not mask.any():
+        return mask
+    warm = mask & (lab[:, :, 1] >= 132)
+    if int(warm.sum()) >= 32:
+        return warm
+    return mask
 
 
 def _hair_seed(
@@ -243,6 +272,7 @@ def _jaw_y(
         return 0
     y0, y1 = int(ys[0]), int(ys[-1])
     fallback = y0 + int(round(jaw_frac * max(1, y1 - y0)))
+    cheek_peak = float(max(int(widths[ys].max()), 1))
     peak_y = int(ys[int(np.argmax(widths[ys]))])
     start = peak_y
     eyes = _union_roles(layers, ["eye_l", "eye_r"])
@@ -257,8 +287,7 @@ def _jaw_y(
     search = widths[start : y1 + 1]
     if search.size == 0:
         return fallback
-    peak = float(max(int(search.max()), 1))
-    pinch = np.where(search <= neck_width_frac * peak)[0]
+    pinch = np.where(search <= neck_width_frac * cheek_peak)[0]
     if pinch.size:
         return start + int(pinch[0])
     return max(fallback, start)
@@ -286,14 +315,10 @@ def _pick_hair_dest(
     hair_fallback: str,
     taxonomy: Taxonomy,
 ) -> str:
-    have = {layer.role for layer in layers}
-    if hair_role in have or hair_role in taxonomy.roles:
-        if hair_role in have:
-            return hair_role
-        if hair_fallback in have:
-            return hair_fallback
+    del layers
+    if hair_role in taxonomy.roles:
         return hair_role
-    if hair_fallback in have or hair_fallback in taxonomy.roles:
+    if hair_fallback in taxonomy.roles:
         return hair_fallback
     return hair_role
 

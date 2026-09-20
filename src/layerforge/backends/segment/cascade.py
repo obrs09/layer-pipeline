@@ -766,6 +766,11 @@ class CascadeSegment:
     def _apply_face_split(self, image: np.ndarray, kept: list[LayerMask]) -> list[LayerMask]:
         split_cfg = (self.cfg.get("cascade") or {}).get("face_split") or {}
         kept, report = split_face_colors(image, kept, self.taxonomy, split_cfg)
+        dest = report.get("hair_role")
+        if dest and int(report.get("hair_px") or 0) > 0:
+            for bucket in (self.missing, self.needs_click):
+                if dest in bucket:
+                    bucket.remove(dest)
         if self.dump is not None and report.get("applied"):
             self.dump.write_json("04_segment/face_split.json", report)
         return kept
