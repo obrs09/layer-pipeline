@@ -195,6 +195,26 @@ def test_overlay_layers_do_not_count_as_cover():
     assert layers[0].role == "body"
 
 
+def test_fill_skips_eye_overlay_holes():
+    domain = _character()
+    source = np.full((96, 80, 3), 40, dtype=np.uint8)
+    face = LayerMask(role="face", label="face", visible=domain.copy(), source="sam")
+    face.visible[40:52, 28:52] = 0
+    eye = LayerMask(role="eye_l", label="eye_l", visible=np.zeros_like(domain), source="sam")
+    eye.visible[40:52, 28:52] = 255
+    layers, report = fill_unclaimed_domain(
+        [face, eye],
+        domain,
+        load_taxonomy(),
+        source,
+        max_dist=4,
+        skip_roles=("eye_l", "eye_r", "mouth"),
+    )
+    face_out = next(layer for layer in layers if layer.role == "face")
+    assert int(face_out.visible[46, 40]) == 0
+    assert report["hole_px_after"] > 0
+
+
 def test_fill_never_leaves_the_character_domain():
     domain = _character()
     source = np.full((96, 80, 3), 40, dtype=np.uint8)

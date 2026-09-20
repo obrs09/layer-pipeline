@@ -14,6 +14,7 @@ ROLE_COLORS: dict[str, tuple[int, int, int]] = {
     "body": (80, 200, 80),
     "clothes": (50, 120, 255),
     "face": (255, 170, 70),
+    "neck": (255, 200, 140),
     "hair_front": (220, 80, 200),
     "hair_back": (160, 50, 160),
     "eye_l": (255, 80, 80),

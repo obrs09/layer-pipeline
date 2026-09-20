@@ -14,6 +14,7 @@ from layerforge.image_io import alpha_over, bbox_from_mask
 from layerforge.ingest import ingest_input
 from layerforge.logutil import RunLog, write_tags_json
 from layerforge.ops.assign_roles import assign_roles
+from layerforge.ops.face_split import split_face_colors
 from layerforge.ops.normalize import resize_max_side, to_rgba
 from layerforge.ops.occlusion import plan_occlusion
 from layerforge.ops.occlusion import occluded_over_lower_visible
@@ -159,6 +160,7 @@ def run_pipeline(
         max_dist=float(refine_cfg.get("seam_fill_px", 24)),
         domain=domain,
     )
+    split_cfg = (cfg.get("cascade") or {}).get("face_split") or {}
     if domain is not None:
         background_luma = int((cfg.get("occlusion") or {}).get("background_luma", 250))
         before = unclaimed_in_domain(masks, domain, taxonomy, source, background_luma)
@@ -172,10 +174,14 @@ def run_pipeline(
             background_luma=background_luma,
             min_area=int(refine_cfg.get("min_area", 64)),
             max_dist=float(refine_cfg.get("seam_fill_px", 24)),
+            skip_roles=list(split_cfg.get("punch_roles") or ("eye_l", "eye_r", "mouth")),
         )
         uncovered = unclaimed_in_domain(masks, domain, taxonomy)
         coverage["character_uncovered_px"] = int(uncovered.sum())
         log.write("coverage", **coverage)
+    masks, split_report = split_face_colors(source, masks, taxonomy, split_cfg)
+    if split_report.get("applied"):
+        dump.write_json("05_refine/face_split.json", split_report)
     log.write("refine", count=len(masks))
     ids = _layer_ids(masks, taxonomy)
     dump.write_layers("05_refine", source, masks, ids)

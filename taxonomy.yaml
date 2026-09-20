@@ -21,7 +21,7 @@ roles:
     complete: true
     overlay: false
     expand_px: 24
-    occluded_by: [body, arm_l, arm_r, clothes, face, hair_front, acc]
+    occluded_by: [body, neck, arm_l, arm_r, clothes, face, hair_front, acc]
     cut_priority: 65
     required: true
     required_if_tags: [long_hair, ponytail, twintails, braid, hair_over_shoulder, white_hair, silver_hair, grey_hair, short_hair]
@@ -44,7 +44,7 @@ roles:
     complete: true
     overlay: false
     expand_px: 20
-    occluded_by: [arm_l, arm_r, clothes, face, hair_front, acc]
+    occluded_by: [neck, arm_l, arm_r, clothes, face, hair_front, acc]
     cut_priority: 30
     required: true
     # Anatomical figure (pose torso/limbs), including occluded parts for inpaint.
@@ -64,6 +64,25 @@ roles:
       min_box_cover: 0.25
       max_out_of_box: 0.6
       max_overlap_frac: 0.7
+
+  # Split from the SAM face dump (skin below the jaw). Not a DINO inventory role.
+  neck:
+    order: 22
+    complete: true
+    overlay: false
+    expand_px: 8
+    occluded_by: [arm_l, arm_r, clothes, face, hair_front, acc]
+    cut_priority: 35
+    required: false
+    queries: []
+    aliases: [throat]
+    usable:
+      min_area_frac: 0.001
+      max_area_frac: 0.12
+      max_components: 2
+      min_box_cover: 0.0
+      max_out_of_box: 1.0
+      max_overlap_frac: 0.5
 
   arm_l:
     order: 25

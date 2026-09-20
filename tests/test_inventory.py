@@ -17,6 +17,7 @@ def test_required_eyes_and_face_always_wanted():
     assert "hair_back" in wanted
     assert "hair_front" not in wanted
     assert "acc" not in wanted
+    assert "neck" not in wanted
 
 
 def test_bangs_tag_requests_front_hair():

@@ -200,27 +200,36 @@ def fill_unclaimed_domain(
     background_luma: int = 250,
     min_area: int = 64,
     max_dist: float = 24.0,
+    skip_roles: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[list[LayerMask], dict]:
     """Every character pixel ends up in a non-overlay layer so the stack has no holes.
 
     Thin leftovers (never farther than max_dist from a layer) join the nearest
     non-overlay layer, like seam fill. Anything with real interior becomes body:
     unclaimed flesh, hands, or hair the detectors missed. Returns (layers, report).
+    skip_roles (eyes/mouth) stay punched out of complete layers; the overlay sprite covers them.
     """
     import cv2
 
     residual = unclaimed_in_domain(layers, domain, taxonomy, source, background_luma)
+    hole_before = int(residual.sum())
+    skip = {str(name) for name in (skip_roles or ())}
+    if skip:
+        for layer in layers:
+            if layer.role in skip:
+                residual &= ~(layer.visible > 0)
     domain_px = int((domain > 0).sum())
     report: dict = {
         "domain_px": domain_px,
-        "hole_px_before": int(residual.sum()),
+        "hole_px_before": hole_before,
         "seam_px": 0,
         "body_px": 0,
         "blobs": [],
     }
     if not residual.any():
-        report["hole_px_after"] = 0
-        report["hole_frac_after"] = 0.0
+        after = unclaimed_in_domain(layers, domain, taxonomy, source, background_luma)
+        report["hole_px_after"] = int(after.sum())
+        report["hole_frac_after"] = float(after.sum() / max(1, domain_px))
         return layers, report
 
     candidates = [idx for idx, layer in enumerate(layers) if not taxonomy.spec(layer.role).overlay]

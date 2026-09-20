@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 脸切完后按颜色拆脸 / 脖子 / 头发
+
+- 做了：切完 face + eyes + mouth 后 `split_face_colors`：从脸上扣掉眼/嘴，Lab 就近分成肤色/发色/其他；肤色用宽度收窄找下巴，脖子写成 taxonomy `neck`（order 22，不进 DINO 库存）；发色并进 `hair_front`（没有则 `hair_back`）；选区膨胀 `expand_px=3`。refine 的 fill 不再把眼/嘴 overlay 洞填回脸，并在 fill 后再拆一次，免得 seam 把头发贴回去。配置在 `cascade.face_split`。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（124 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/layers/22_neck.png`、`steps/04_segment/face_split.json`。6 张都有 neck。4034 脸上扣了眼/嘴洞，剥走 18k 发色像素；296 剥走 10k。`missing`：640 `[hair_front]`，其余 `[]`
+- 未做 / 已知缺陷：白发/浅发仍会留在脸上（4034 右侧刘海、a163 刘海、296 蓝发）。脖子只是下巴下一小条。颜色对不上的像素仍可能被 fill 折进 body。640 `hair_front` 仍缺。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 2.4 按切开顺序落盘；taxonomy 含头发 query
 
 - 做了：`04_segment` 文件名改成切开序号 `00_clothes` / `01_face` / …（不是 taxonomy 绘制 `order` 的 `10_hair_back`）。`cut_order.json` 记 planned vs 实际 kept。DINO 框按 `_trace_box` 顺序编号，`03_boxes/{index}_{role}.png` 单框 + `overlay.png` 全框。`layers/` `masks/` 仍用 `{order}_{role}`，**没改 schema、没改切件算法、没改 .venv**。头发在 taxonomy：`hair_back.queries=["hair","anime hair","long hair","back hair"]`，`hair_front.queries=["bangs","front hair",…]`，`_cut_one` 用这些英文 query 跑 Grounding DINO。

@@ -301,6 +301,9 @@ def test_cut_order_clothes_before_hair():
     assert order.index("face") < order.index("hair_front")
     assert order.index("eye_l") > order.index("hair_front")
     assert "body" not in order
+    assert "neck" not in CascadeSegment({}, load_taxonomy())._cut_order(
+        ["neck", "clothes", "face", "hair_back"]
+    )
 
 
 def test_inventory_hair_front_failure_is_missing():

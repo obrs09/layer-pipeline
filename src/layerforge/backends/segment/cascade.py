@@ -10,6 +10,7 @@ from layerforge.ops.character_qa import (
     evaluate_character_qa,
     peers_agree_isnet_outlier,
 )
+from layerforge.ops.face_split import split_face_colors
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.usable import usable
@@ -163,6 +164,7 @@ class CascadeSegment:
         for spec in self.taxonomy.roles.values():
             if spec.required and spec.name not in {layer.role for layer in kept}:
                 self._mark_missing(spec.name)
+        kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
         self._dump_failures()
         return kept
@@ -174,7 +176,10 @@ class CascadeSegment:
         for role in inventory:
             if role == "body":
                 continue
-            if self.taxonomy.spec(role).overlay:
+            spec = self.taxonomy.spec(role)
+            if not spec.queries and not spec.overlay:
+                continue
+            if spec.overlay:
                 overlay.append(role)
             else:
                 mid.append(role)
@@ -232,6 +237,7 @@ class CascadeSegment:
                         kept.append(layer)
                         continue
                 self._mark_missing(role)
+        kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
         self._dump_failures()
         return kept
@@ -756,6 +762,13 @@ class CascadeSegment:
             self.missing.append(role)
         if role not in self.needs_click:
             self.needs_click.append(role)
+
+    def _apply_face_split(self, image: np.ndarray, kept: list[LayerMask]) -> list[LayerMask]:
+        split_cfg = (self.cfg.get("cascade") or {}).get("face_split") or {}
+        kept, report = split_face_colors(image, kept, self.taxonomy, split_cfg)
+        if self.dump is not None and report.get("applied"):
+            self.dump.write_json("04_segment/face_split.json", report)
+        return kept
 
     def _dump_character(self, image: np.ndarray, mask: np.ndarray) -> None:
         if self.dump is None:
