@@ -16,6 +16,7 @@ class SamHintedSegment:
         self._predictor = None
         self._generator = None
         self._backend: dict = {}
+        self._full_rgb = None
 
     def _cuda_or_die(self) -> str:
         try:
@@ -87,7 +88,72 @@ class SamHintedSegment:
 
     def prepare(self, rgb: np.ndarray) -> None:
         self._load()
-        self._predictor.set_image(rgb[:, :, :3] if rgb.ndim == 3 and rgb.shape[2] >= 3 else rgb)
+        frame = rgb[:, :, :3] if rgb.ndim == 3 and rgb.shape[2] >= 3 else rgb
+        self._full_rgb = np.ascontiguousarray(frame)
+        self._predictor.set_image(self._full_rgb)
+
+    def _restore_full_image(self) -> None:
+        if self._full_rgb is None or self._predictor is None:
+            return
+        self._predictor.set_image(self._full_rgb)
+
+    def predict_on_crop(
+        self,
+        box: list[float],
+        positive: list[tuple[float, float]] | None = None,
+        negative: list[tuple[float, float]] | None = None,
+        *,
+        pad_frac: float = 0.18,
+        min_side: int = 1024,
+    ) -> tuple[np.ndarray | None, float]:
+        """SAM2 on a padded, upscaled DINO box. Mask is pasted back to the full frame."""
+        from layerforge.ops.sam_crop import (
+            box_to_crop,
+            crop_origin,
+            points_to_crop,
+            upscale_hw,
+        )
+
+        self._load()
+        if self._full_rgb is None:
+            return self.predict_box_points(box, positive, negative)
+        rgb = self._full_rgb
+        h, w = rgb.shape[:2]
+        x0, y0, x1, y1 = crop_origin(box, pad_frac, w, h)
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            return self.predict_box_points(box, positive, negative)
+        crop = rgb[y0:y1, x0:x1]
+        ch, cw = crop.shape[:2]
+        new_h, new_w, scale = upscale_hw(ch, cw, int(min_side))
+        if scale > 1.0:
+            import cv2
+
+            crop_up = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+        else:
+            crop_up = crop
+            new_h, new_w = ch, cw
+        origin = (x0, y0)
+        box_c = box_to_crop(box, origin, scale)
+        pos_c = points_to_crop(list(positive or []), origin, scale, new_w, new_h)
+        if not pos_c:
+            pos_c = [((box_c[0] + box_c[2]) / 2.0, (box_c[1] + box_c[3]) / 2.0)]
+        neg_c = points_to_crop(list(negative or []), origin, scale, new_w, new_h)
+        self._predictor.set_image(crop_up)
+        try:
+            mask_up, score = self.predict_box_points(box_c, pos_c, neg_c)
+        finally:
+            self._restore_full_image()
+        if mask_up is None:
+            return None, score
+        if mask_up.shape[0] != ch or mask_up.shape[1] != cw:
+            import cv2
+
+            mask_crop = cv2.resize(mask_up, (cw, ch), interpolation=cv2.INTER_NEAREST)
+        else:
+            mask_crop = mask_up
+        full = np.zeros((h, w), dtype=np.uint8)
+        full[y0:y1, x0:x1] = (mask_crop > 127).astype(np.uint8) * 255
+        return full, score
 
     def predict_box_points(
         self,

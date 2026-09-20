@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
-from layerforge.backends.segment.cascade import CascadeSegment, _constrain_mask, _rank_boxes
+from layerforge.backends.segment.cascade import (
+    CascadeSegment,
+    _constrain_mask,
+    _neighbor_negatives,
+    _rank_boxes,
+)
 from layerforge.taxonomy import load_taxonomy
 
 
@@ -85,6 +90,16 @@ class _Sam2:
                 vis[y0:y1, x0:x1] = 255
             return vis, 0.9
         return self.mask, 0.9
+
+
+class _Sam2Crop(_Sam2):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.crop_calls = 0
+
+    def predict_on_crop(self, box, positive, negative, pad_frac=0.18, min_side=1024):
+        self.crop_calls += 1
+        return self.predict_box_points(box, positive, negative)
 
 
 def _image():
@@ -293,13 +308,14 @@ def test_constrain_mask_clips_to_box():
     assert int(out[7, 7]) == 255
 
 
-def test_cut_order_clothes_before_hair():
+def test_cut_order_clothes_hair_then_face():
     order = CascadeSegment({}, load_taxonomy())._cut_order(
-        ["hair_front", "clothes", "face", "eye_l", "body"]
+        ["hair_front", "clothes", "face", "eye_l", "hair_back", "body"]
     )
-    assert order.index("clothes") < order.index("hair_front")
-    assert order.index("face") < order.index("hair_front")
-    assert order.index("eye_l") > order.index("hair_front")
+    assert "hair_front" not in order
+    assert order.index("clothes") < order.index("hair_back")
+    assert order.index("hair_back") < order.index("face")
+    assert order.index("face") < order.index("eye_l")
     assert "body" not in order
     assert "neck" not in CascadeSegment({}, load_taxonomy())._cut_order(
         ["neck", "clothes", "face", "hair_back"]
@@ -452,6 +468,82 @@ def test_hair_from_residual_leaves_far_blobs_for_body():
     assert int(hair.visible[30, 45]) == 255
     # residual far left of the head zone, chained only through the silhouette rim, is not
     assert int(hair.visible[30, 22]) == 0
+
+
+def test_hair_split_front_from_face_zone():
+    h, w = 80, 60
+    hair_vis = np.zeros((h, w), dtype=np.uint8)
+    hair_vis[5:50, 10:50] = 255
+    face_vis = np.zeros((h, w), dtype=np.uint8)
+    face_vis[20:42, 18:42] = 255
+    cascade = CascadeSegment(
+        {
+            "cascade": {
+                "hair_split": {
+                    "enabled": True,
+                    "face_dilate_px": 2,
+                    "up_frac": 0.4,
+                    "face_height_frac": 0.55,
+                    "min_front_px": 16,
+                    "min_back_px": 16,
+                }
+            }
+        },
+        load_taxonomy(),
+        character=_Cut(),
+    )
+    cascade.inventory = ["hair_back", "hair_front", "face"]
+    kept = [
+        LayerMask(role="hair_back", label="hair", visible=hair_vis.copy(), source="sam"),
+        LayerMask(role="face", label="face", visible=face_vis, source="sam"),
+    ]
+    cascade._punch_face_from_hair(kept)
+    cascade._split_hair_front(kept)
+    by_role = {layer.role: layer for layer in kept}
+    assert "hair_front" in by_role
+    assert int(by_role["hair_front"].visible[12, 30]) == 255
+    assert int(by_role["hair_back"].visible[48, 30]) == 255
+    assert int(by_role["hair_back"].visible[30, 30]) == 0
+    assert int(by_role["hair_front"].visible[30, 30]) == 0
+
+
+def test_hair_split_skipped_when_disabled():
+    h, w = 40, 40
+    hair = LayerMask(role="hair_back", label="hair", visible=_blob(h, w, 2, 4, 30, 36), source="sam")
+    face = LayerMask(role="face", label="face", visible=_blob(h, w, 8, 12, 22, 28), source="sam")
+    cascade = CascadeSegment({"cascade": {"hair_split": {"enabled": False}}}, load_taxonomy())
+    cascade.inventory = ["hair_back", "hair_front", "face"]
+    kept = [hair, face]
+    cascade._split_hair_front(kept)
+    assert all(layer.role != "hair_front" for layer in kept)
+
+
+def test_sam_crop_used_for_face():
+    sam2 = _Sam2Crop(fill_box=True)
+    cascade = CascadeSegment(
+        {"cascade": {"sam_crop": {"enabled": True, "roles": ["face"], "min_side": 32}}},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99}),
+        boxes=_Dino({"anime face": [[12, 6, 36, 28]], "face": [[12, 6, 36, 28]]}),
+        sam3=_Sam3({}),
+        sam2=sam2,
+    )
+    layers = cascade.segment(_image(), SegmentHints())
+    assert any(layer.role == "face" for layer in layers)
+    assert sam2.crop_calls >= 1
+
+
+def test_neighbor_negatives_avoid_face_box():
+    hair = np.zeros((40, 40), dtype=np.uint8)
+    hair[2:6, 10:30] = 255
+    hair[10:24, 12:28] = 255
+    layer = LayerMask(role="hair_back", label="hair", visible=hair, source="sam")
+    avoided = _neighbor_negatives([layer], ("hair_back",), avoid_box=[10.0, 8.0, 30.0, 26.0])
+    raw = _neighbor_negatives([layer], ("hair_back",))
+    assert avoided and raw
+    assert avoided[0][1] < 8.0
+    assert raw[0][1] > avoided[0][1]
 
 
 def test_inject_pose_box_goes_first():

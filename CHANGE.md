@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 脸走裁块放大 SAM2；整发后几何拆前后发
+
+- 做了：切序改成衣服 → 整发（`hair_back` query）→ 脸 → 眼/嘴。脸在 DINO 框上 pad+放大（短边 ≥1024）再 SAM2，裁完立刻恢复全图 embedding。整发收下后面孔，再按脸膨胀 + 额头区几何拆 `hair_front`。邻域负点避开脸框。`sam_crop.roles` 只留 `face`（眼/嘴裁块会把框坐标当全图，296 眼、908 嘴被切成整个人）。`face_split` 仍关，不切脖子。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（138 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/`（脸是 `02_face` 或 `01_face`/`03_face`，看切序）、`hair_split.json`。`missing`：6 张都是 `[]`。640 `hair_front` 建成（1418 / back 37165）。hair_split front_px：296=31604、4034=133659、458=21675、640=1418、908=49040、a163=51049
+- 未做 / 已知缺陷：几何拆只能剥整发 mask 里盖住脸区的像素，SAM 已经写进 face 的刘海还在脸上（296 蓝刘海、4034/a163 白刘海、908 发盖脸）。458/640 整发 SAM 失败，头发是残差后补，640 前发只剩一条 1418px。4034 前发几乎是整颗头（zone 太大）。908 `arm_l` 仍切不出。没重开 `face_split`、没切脖子。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 关掉按颜色拆脸，退回 SAM 脸
 
 - 做了：`cascade.face_split.enabled: false`。不再对 SAM 脸做 Lab / 区域生长 / 线稿停边 / 切脖子。`01_face` 回到切件当时的 mask。拆脸代码和测试还在，YAML 打开即可。refine 仍不把眼/嘴洞填回脸。**没改 schema、没改 .venv**

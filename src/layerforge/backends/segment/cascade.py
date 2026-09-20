@@ -114,6 +114,8 @@ class CascadeSegment:
         ordered = self._cut_order(inventory)
         self.cut_plan = list(ordered)
         for role in ordered:
+            if role == "hair_front":
+                continue
             family = self.taxonomy.family_of_role(role)
             if family:
                 if family in skip_pair:
@@ -147,6 +149,9 @@ class CascadeSegment:
             layer = self._cut_one(image, character, role, kept)
             if layer is not None:
                 kept.append(layer)
+                if role == "face":
+                    self._punch_face_from_hair(kept)
+                    self._split_hair_front(kept)
             elif spec.required or spec.required_if_tags:
                 self._mark_missing(role)
         hair = self._hair_from_residual(character, kept)
@@ -155,6 +160,10 @@ class CascadeSegment:
             for bucket in (self.missing, self.needs_click):
                 if "hair_back" in bucket:
                     bucket.remove("hair_back")
+        self._punch_face_from_hair(kept)
+        self._split_hair_front(kept)
+        if "hair_front" in inventory and not any(layer.role == "hair_front" for layer in kept):
+            self._mark_missing("hair_front")
         if "body" in inventory:
             body = self._body_from_residual(character, kept, image)
             if body is not None:
@@ -170,11 +179,11 @@ class CascadeSegment:
         return kept
 
     def _cut_order(self, inventory: list[str]) -> list[str]:
-        """Clothes/face before hair so SAM can use them as negatives. Overlays last."""
+        """Clothes, then whole hair, then face. Front hair is split later, not SAM-cut."""
         overlay: list[str] = []
         mid: list[str] = []
         for role in inventory:
-            if role == "body":
+            if role == "body" or role == "hair_front":
                 continue
             spec = self.taxonomy.spec(role)
             if not spec.queries and not spec.overlay:
@@ -185,9 +194,12 @@ class CascadeSegment:
                 mid.append(role)
 
         def mid_key(role: str):
-            if role in {"hair_front", "hair_back"}:
-                return (1, self.taxonomy.spec(role).order)
-            return (0, self.taxonomy.spec(role).order)
+            spec = self.taxonomy.spec(role)
+            if role == "hair_back":
+                return (1, spec.order)
+            if role == "face":
+                return (2, spec.order)
+            return (0, spec.order)
 
         mid.sort(key=mid_key)
         overlay.sort(key=lambda role: -self.taxonomy.spec(role).cut_priority)
@@ -237,6 +249,8 @@ class CascadeSegment:
                         kept.append(layer)
                         continue
                 self._mark_missing(role)
+        self._punch_face_from_hair(kept)
+        self._split_hair_front(kept)
         kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
         self._dump_failures()
@@ -336,6 +350,26 @@ class CascadeSegment:
         if self.sam2 is not None and hasattr(self.sam2, "prepare"):
             self.sam2.prepare(image[:, :, :3])
 
+    def _sam_predict(
+        self,
+        role: str,
+        box: list[float],
+        pos: list[tuple[float, float]],
+        neg: list[tuple[float, float]],
+    ) -> tuple[np.ndarray | None, float]:
+        crop_cfg = (self.cfg.get("cascade") or {}).get("sam_crop") or {}
+        roles = set(crop_cfg.get("roles") or ("face",))
+        use_crop = bool(crop_cfg.get("enabled", True)) and role in roles
+        if use_crop and hasattr(self.sam2, "predict_on_crop"):
+            return self.sam2.predict_on_crop(
+                box,
+                pos,
+                neg,
+                pad_frac=float(crop_cfg.get("pad_frac", 0.18)),
+                min_side=int(crop_cfg.get("min_side", 1024)),
+            )
+        return self.sam2.predict_box_points(box, pos, neg)
+
     def _cut_one(
         self,
         image: np.ndarray,
@@ -395,8 +429,9 @@ class CascadeSegment:
                 self._trace_box(role, query, box, detections)
                 pos = [_box_center(box)]
                 pos.extend(self.pose_points.get(role) or [])
-                neg = _neighbor_negatives(others, spec.exclude_roles)
-                mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
+                avoid = box if role == "face" else None
+                neg = _neighbor_negatives(others, spec.exclude_roles, avoid_box=avoid)
+                mask, sam_score = self._sam_predict(role, box, pos, neg)
                 if mask is None:
                     last_reasons.append(f"sam2_empty:{query}")
                     continue
@@ -511,7 +546,7 @@ class CascadeSegment:
             for other_role, other_box in assigned.items():
                 if other_role != role:
                     neg.append(_box_center(other_box))
-            mask, sam_score = self.sam2.predict_box_points(box, pos, neg)
+            mask, sam_score = self._sam_predict(role, box, pos, neg)
             if mask is None:
                 if role not in self.needs_click:
                     self.needs_click.append(role)
@@ -608,7 +643,7 @@ class CascadeSegment:
             self._trace_box("acc", query, xyxy, detections)
             pos = [_box_center(xyxy)]
             neg = _neighbor_negatives(others + layers, spec.exclude_roles)
-            mask, sam_score = self.sam2.predict_box_points(xyxy, pos, neg)
+            mask, sam_score = self._sam_predict("acc", xyxy, pos, neg)
             if mask is None:
                 continue
             mask = _constrain_mask(mask, character, xyxy)
@@ -762,6 +797,77 @@ class CascadeSegment:
             self.missing.append(role)
         if role not in self.needs_click:
             self.needs_click.append(role)
+
+    def _punch_face_from_hair(self, kept: list[LayerMask]) -> None:
+        face = next((layer for layer in kept if layer.role == "face" and int((layer.visible > 0).sum()) > 0), None)
+        if face is None:
+            return
+        face_vis = face.visible > 0
+        for layer in kept:
+            if layer.role != "hair_back":
+                continue
+            remain = (layer.visible > 0) & ~face_vis
+            if int(remain.sum()) < 16:
+                continue
+            layer.visible = remain.astype(np.uint8) * 255
+            layer.notes = _join_notes(layer.notes, "punched face")
+
+    def _split_hair_front(self, kept: list[LayerMask]) -> None:
+        """Peel bangs from whole hair by overlap with the face, not by color."""
+        split_cfg = (self.cfg.get("cascade") or {}).get("hair_split") or {}
+        if not bool(split_cfg.get("enabled", True)):
+            return
+        if "hair_front" not in set(self.inventory):
+            return
+        if any(layer.role == "hair_front" and int((layer.visible > 0).sum()) > 0 for layer in kept):
+            return
+        hair = next((layer for layer in kept if layer.role == "hair_back" and int((layer.visible > 0).sum()) > 0), None)
+        face = next((layer for layer in kept if layer.role == "face" and int((layer.visible > 0).sum()) > 0), None)
+        if hair is None or face is None:
+            return
+        dilate_px = int(split_cfg.get("face_dilate_px", 8))
+        up_frac = float(split_cfg.get("up_frac", 0.45))
+        height_frac = float(split_cfg.get("face_height_frac", 0.55))
+        min_front = int(split_cfg.get("min_front_px", 32))
+        min_back = int(split_cfg.get("min_back_px", 64))
+        zone = dilate_mask(face.visible, dilate_px) > 0
+        x, y, bw, bh = face.bbox
+        h, w = hair.visible.shape
+        y0 = max(0, int(round(y - bh * up_frac)))
+        y1 = min(h, int(round(y + bh * height_frac)))
+        x0 = max(0, int(round(x - bw * 0.08)))
+        x1 = min(w, int(round(x + bw * 1.08)))
+        if x1 > x0 and y1 > y0:
+            zone[y0:y1, x0:x1] = True
+        hair_vis = hair.visible > 0
+        front = hair_vis & zone
+        back = hair_vis & ~zone
+        if int(front.sum()) < min_front:
+            return
+        if int(back.sum()) >= min_back:
+            hair.visible = back.astype(np.uint8) * 255
+            hair.notes = _join_notes(hair.notes, "hair_split remainder")
+        kept.append(
+            _layer(
+                "hair_front",
+                front.astype(np.uint8) * 255,
+                hair.score,
+                "hair_split whole hair ∩ face zone",
+            )
+        )
+        for bucket in (self.missing, self.needs_click):
+            if "hair_front" in bucket:
+                bucket.remove("hair_front")
+        if self.dump is not None:
+            self.dump.write_json(
+                "04_segment/hair_split.json",
+                {
+                    "applied": True,
+                    "front_px": int(front.sum()),
+                    "back_px": int(back.sum()),
+                    "peeled": int(back.sum()) >= min_back,
+                },
+            )
 
     def _apply_face_split(self, image: np.ndarray, kept: list[LayerMask]) -> list[LayerMask]:
         split_cfg = (self.cfg.get("cascade") or {}).get("face_split") or {}
@@ -932,12 +1038,27 @@ def _pick_box(detections, character: np.ndarray, role: str) -> list[float]:
     return best
 
 
-def _neighbor_negatives(others: list[LayerMask], exclude_roles: tuple[str, ...]) -> list[tuple[float, float]]:
+def _neighbor_negatives(
+    others: list[LayerMask],
+    exclude_roles: tuple[str, ...],
+    avoid_box: list[float] | None = None,
+) -> list[tuple[float, float]]:
     points: list[tuple[float, float]] = []
     for layer in others:
         if layer.role not in exclude_roles:
             continue
-        ys, xs = np.where(layer.visible > 0)
+        vis = layer.visible > 0
+        if avoid_box is not None:
+            h, w = vis.shape
+            x0, y0, x1, y1 = [int(round(v)) for v in avoid_box]
+            x0, y0 = max(0, x0), max(0, y0)
+            x1, y1 = min(w, x1), min(h, y1)
+            if x1 > x0 and y1 > y0 and vis.any():
+                hole = vis.copy()
+                hole[y0:y1, x0:x1] = False
+                if hole.any():
+                    vis = hole
+        ys, xs = np.where(vis)
         if xs.size == 0:
             continue
         points.append((float(xs.mean()), float(ys.mean())))

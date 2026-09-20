@@ -23,6 +23,20 @@ cascade:
   # Residual hair must touch the head zone. Wrist discs split held props off that blob.
   hair_punch_pose_roles: [arm_l, arm_r]
   hair_punch_pose_pad: 48
+  # Small parts: DINO box → pad → upscale → SAM2 on the crop → remap.
+  sam_crop:
+    enabled: true
+    roles: [face]
+    pad_frac: 0.18
+    min_side: 1024
+  # Whole hair is SAM-cut as hair_back; bangs are the overlap with the face zone.
+  hair_split:
+    enabled: true
+    face_dilate_px: 8
+    up_frac: 0.45
+    face_height_frac: 0.55
+    min_front_px: 32
+    min_back_px: 64
   # Off: Lab/grow/edge peel of hair from the SAM face did more harm than good.
   face_split:
     enabled: false
