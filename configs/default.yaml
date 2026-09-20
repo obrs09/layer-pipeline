@@ -37,6 +37,8 @@ cascade:
     neck_width_frac: 0.62
     skin_dist: 18
     hair_dist: 24
+    skin_mode: grow
+    local_dist: 16
     min_neck_px: 64
     min_hair_px: 32
     cheek_dilate_px: 12

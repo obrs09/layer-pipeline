@@ -15,9 +15,9 @@ def split_face_colors(
 ) -> tuple[list[LayerMask], dict]:
     """Punch eyes/mouth out of face, then split leftover pixels by color.
 
-    Skin above the jaw stays face. Skin below becomes neck. Hair-colored leftover
-    joins hair_front (else hair_back). Anything else is dropped so later stages
-    treat it as unclaimed. Expand skin selections by expand_px (1px) before the hair grab.
+    Skin grows from cheek seeds through 3x3 neighbors (or a global Lab ball if
+    skin_mode=global). Skin above the jaw stays face. Skin below becomes neck.
+    Hair-colored leftover joins hair_front. Expand skin selections by expand_px.
     """
     cfg = dict(cfg or {})
     report: dict = {"enabled": bool(cfg.get("enabled", True)), "applied": False}
@@ -42,6 +42,8 @@ def split_face_colors(
     min_neck_px = int(cfg.get("min_neck_px", 64))
     min_hair_px = int(cfg.get("min_hair_px", 32))
     cheek_dilate_px = int(cfg.get("cheek_dilate_px", 12))
+    skin_mode = str(cfg.get("skin_mode") or "grow")
+    local_dist = float(cfg.get("local_dist", 16))
 
     rgb = image[:, :, :3]
     lab = _to_lab(rgb)
@@ -55,7 +57,7 @@ def split_face_colors(
         report["applied"] = True
         return layers, report
 
-    skin_seed = _skin_seed(
+    skin_seed, seed_mask = _skin_seed(
         lab, remaining, layers, punch_roles, cheek_dilate_px, [hair_role, hair_fallback]
     )
     if skin_seed is None:
@@ -64,11 +66,24 @@ def split_face_colors(
     hair_seed = _hair_seed(lab, remaining, remaining & (d_skin <= skin_dist), layers, hair_role, hair_fallback)
     if hair_seed is not None:
         d_hair = _lab_dist(lab, hair_seed, l_weight)
-        skin = remaining & (d_skin <= skin_dist) & (d_skin < d_hair)
+        cap = remaining & (d_skin <= skin_dist) & (d_skin < d_hair)
         hair_like = remaining & (d_hair <= hair_dist) & (d_hair <= d_skin)
     else:
-        skin = remaining & (d_skin <= skin_dist)
+        cap = remaining & (d_skin <= skin_dist)
         hair_like = np.zeros_like(remaining)
+
+    if skin_mode == "grow":
+        warm = _warm_skin(lab, remaining)
+        start = (warm & cap) | (seed_mask & remaining)
+        walk = cap | punched | start
+        grown = _grow_skin(lab, walk, start, skin_seed, local_dist, l_weight)
+        skin = grown & remaining
+        if int(skin.sum()) < 32:
+            skin = cap
+        report["skin_mode"] = "grow"
+    else:
+        skin = cap
+        report["skin_mode"] = "global"
 
     already_neck = any(
         layer.role == neck_role and int((layer.visible > 0).sum()) >= min_neck_px for layer in layers
@@ -198,32 +213,63 @@ def _skin_seed(
     punch_roles: list[str],
     cheek_dilate_px: int,
     hair_roles: list[str],
-) -> np.ndarray | None:
+) -> tuple[np.ndarray | None, np.ndarray]:
+    empty = np.zeros_like(remaining)
     hair = _union_roles(layers, hair_roles)
     keep = remaining & ~hair
     eyes = _union_roles(layers, [role for role in punch_roles if role.startswith("eye")])
+    warm_all = _warm_skin(lab, keep if keep.any() else remaining)
+    cheek = empty
     if eyes.any() and cheek_dilate_px > 0:
         band = (dilate_mask(eyes.astype(np.uint8) * 255, cheek_dilate_px) > 0) & keep & ~eyes
-        seed = _median_lab(lab, _warm_skin(lab, band))
-        if seed is not None:
-            return seed
-    ys, xs = np.where(keep)
-    if ys.size == 0:
-        ys, xs = np.where(remaining)
-    if ys.size == 0:
-        return None
-    y0, y1 = int(ys.min()), int(ys.max())
-    x0, x1 = int(xs.min()), int(xs.max())
-    cy0 = y0 + int(0.25 * max(1, y1 - y0))
-    cy1 = y0 + int(0.65 * max(1, y1 - y0))
-    cx0 = x0 + int(0.25 * max(1, x1 - x0))
-    cx1 = x0 + int(0.75 * max(1, x1 - x0))
-    center = np.zeros_like(remaining)
-    center[cy0:cy1, cx0:cx1] = keep[cy0:cy1, cx0:cx1]
-    sample = center if center.any() else keep
-    if not sample.any():
-        sample = remaining
-    return _median_lab(lab, _warm_skin(lab, sample))
+        cheek = _warm_skin(lab, band)
+    seed_src = cheek if int(cheek.sum()) >= 32 else warm_all
+    seed = _median_lab(lab, seed_src)
+    if seed is None:
+        return None, empty
+    return seed, cheek if cheek.any() else seed_src
+
+
+def _grow_skin(
+    lab: np.ndarray,
+    walk: np.ndarray,
+    seed_mask: np.ndarray,
+    seed_color: np.ndarray,
+    local_dist: float,
+    l_weight: float,
+    max_iter: int = 2048,
+) -> np.ndarray:
+    """8-connected grow. A pixel joins if its Lab is within local_dist of grown 3x3 neighbors."""
+    grown = (seed_mask & walk).copy()
+    if not grown.any():
+        d = _lab_dist(lab, seed_color, l_weight)
+        grown = walk & (d <= local_dist)
+    if not grown.any():
+        return walk
+    h, w = walk.shape
+    offsets = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+    for _ in range(max_iter):
+        acc = np.zeros((h, w, 3), dtype=np.float32)
+        cnt = np.zeros((h, w), dtype=np.float32)
+        for dy, dx in offsets:
+            y0, y1 = max(0, dy), h + min(0, dy)
+            x0, x1 = max(0, dx), w + min(0, dx)
+            sy0, sy1 = max(0, -dy), h - max(0, dy)
+            sx0, sx1 = max(0, -dx), w - max(0, dx)
+            src = grown[sy0:sy1, sx0:sx1]
+            acc[y0:y1, x0:x1] += lab[sy0:sy1, sx0:sx1] * src[..., None]
+            cnt[y0:y1, x0:x1] += src.astype(np.float32)
+        border = walk & ~grown & (cnt > 0)
+        if not border.any():
+            break
+        mean = acc / np.maximum(cnt, 1.0)[..., None]
+        delta = lab - mean
+        local = np.sqrt(l_weight * delta[:, :, 0] ** 2 + delta[:, :, 1] ** 2 + delta[:, :, 2] ** 2)
+        add = border & (local <= local_dist)
+        if not add.any():
+            break
+        grown |= add
+    return grown
 
 
 def _warm_skin(lab: np.ndarray, mask: np.ndarray) -> np.ndarray:

@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 脸肤色改成邻域区域生长
+
+- 做了：`cascade.face_split.skin_mode=grow`（`global` 可回退）。肤色不再对整张脸用「中位 Lab 球半径 18」逐像素打标；从颊侧暖色种子（以及 `cap` 里的暖色岛）做 8 连通生长，像素只在 3×3 已生长邻域的 Lab 距离 ≤ `local_dist`（16）时加入。眼/嘴 punch 当通道，避免嘴洞切断脖子。发色仍走全局 `hair_dist`。`skin_mode: global` 可回到旧逻辑。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（128 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/01_face.png`、`face_split.json`（含 `skin_mode: grow`）。剥发 px：4034 25.4k、a163 9.2k、296 14.0k、458 16.0k、640 3.4k、908 14.0k。`missing`：6 张都是 `[]`
+- 未做 / 已知缺陷：a163 嘴周围仍有蛀洞（线稿把生长切断）。4034 发缘仍有白发刺。640 金发仍沾在脸上（金发 Lab 贴近肤色）。296 蓝发还沾一点。脖子仍是下巴下一小条。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 脸选区膨胀 1px，并修拆脸逻辑
 
 - 做了：`cascade.face_split.expand_px` 3→1。顺手修逻辑：（1）肤色种子排除已有头发层，并偏向 Lab a≥132 的暖色，避免刘海把皮肤中心拉白；（2）发色固定进 `hair_front`，不再因为 kept 里只有 `hair_back` 就把刘海塞进后发，切出后从 missing 拿掉；（3）refine 第二次拆脸若已有 neck 就不再按下巴重切；（4）脖子收窄相对整张脸最宽处，不相对嘴下局部峰值。**没改 schema、没改 .venv**

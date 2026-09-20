@@ -24,6 +24,8 @@ def _cfg(**overrides) -> dict:
         "min_neck_px": 40,
         "min_hair_px": 20,
         "cheek_dilate_px": 6,
+        "skin_mode": "grow",
+        "local_dist": 16,
     }
     cfg.update(overrides)
     return cfg
@@ -161,3 +163,49 @@ def test_bangs_prefer_hair_front_even_if_hair_back_exists():
     front = next(layer for layer in out if layer.role == "hair_front")
     assert int((front.visible > 0).sum()) >= 20
     assert front.visible[12, 16]
+
+
+def test_grow_crosses_blush_but_stops_at_hair():
+    """Pale skin next to blush should still join; a gray bang should not."""
+    h, w = 48, 36
+    image = np.zeros((h, w, 3), dtype=np.uint8)
+    vis = np.zeros((h, w), dtype=bool)
+    vis[6:40, 6:30] = True
+    image[6:40, 6:30] = (225, 180, 165)
+    image[14:28, 14:30] = (220, 150, 140)
+    image[6:14, 6:16] = (210, 210, 220)
+    eye = np.zeros((h, w), dtype=bool)
+    eye[18:22, 18:22] = True
+    layers = [
+        _layer("face", vis),
+        _layer("eye_l", eye),
+        _layer("eye_r", np.zeros((h, w), dtype=bool)),
+    ]
+    out, report = split_face_colors(image, layers, load_taxonomy(), _cfg(min_neck_px=400))
+    face = next(layer for layer in out if layer.role == "face").visible > 0
+    assert report.get("skin_mode") == "grow"
+    assert face[22, 22]
+    assert face[30, 18]
+    assert not face[8, 10]
+
+
+def test_grow_stops_at_sharp_hair_edge():
+    """A connected gray strip should not join peach skin just because it touches."""
+    h, w = 40, 32
+    image = np.zeros((h, w, 3), dtype=np.uint8)
+    vis = np.zeros((h, w), dtype=bool)
+    vis[8:32, 6:26] = True
+    image[8:32, 6:26] = (220, 168, 148)
+    image[8:16, 6:12] = (200, 200, 210)
+    eye = np.zeros((h, w), dtype=bool)
+    eye[18:22, 12:16] = True
+    layers = [
+        _layer("face", vis),
+        _layer("eye_l", eye),
+        _layer("eye_r", np.zeros((h, w), dtype=bool)),
+    ]
+    out, report = split_face_colors(image, layers, load_taxonomy(), _cfg(min_neck_px=400))
+    face = next(layer for layer in out if layer.role == "face").visible > 0
+    assert report.get("skin_mode") == "grow"
+    assert face[24, 16]
+    assert not face[10, 8]
