@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 姿态用 DWPose wholebody，不再收成 OpenPose-18
+
+- 做了：`DwPoseEstimate` 不再把 RTMPose 133 点转成 OpenPose-18（丢掉手/脸、人造 `neck`）。overlay / `keypoints.json` / SAM 部件框走 COCO-17 + 脚/脸/手；手臂正点末位是手掌根（`lhand_00` / `rhand_00`），脸框用 68 个脸点。角色 mask 仍不被骨架裁。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（117 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/01_pose/overlay.png`（身体 + 彩色手指 + 脸点）。`keypoints.json` 无 `neck`，有 `lhand_*` / `rhand_*` / `face_*`。`missing`：640 `[hair_front]`，其余 `[]`
+- 未做 / 已知缺陷：二次元脸上 68 点会挤在五官附近。手杖仍在 body。640 `hair_front` 仍缺。908 `arm_l` 仍切不出。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 修 BLOCKER：残差头发不再收手杖
 
 - 做了：`_hair_from_residual` 不再把「质心落在 DINO 头发框里」当成头发。头发框只裁搜索区，连通块必须贴着脸（脸高×`hair_reach`）。手腕点从残差里挖掉（`cascade.hair_punch_pose_roles` / `hair_punch_pose_pad` 48px，YAML），把手杖从贴头的那坨拆开。不用整条手臂框——640 的 `arm_l` 框会把右侧长发一起切掉。测试覆盖「框内孤立手杖」和「经手腕走廊粘上的手杖」。**没改 schema、没改 .venv、只修 BLOCKER**

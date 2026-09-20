@@ -4,8 +4,8 @@ import numpy as np
 
 from layerforge.backends.detect.dwpose import (
     DwPoseEstimate,
+    build_pose_estimate,
     clip_character_to_person,
-    coco17_to_openpose,
     person_mask_from_pose,
 )
 
@@ -33,30 +33,54 @@ def _coco_standing(h=80, w=60):
     return kpts, scores
 
 
-def test_openpose_adds_neck():
+def test_coco_names_not_openpose_neck():
     kpts, scores = _coco_standing()
-    pose_k, pose_s = coco17_to_openpose(kpts, scores)
-    assert pose_k.shape == (18, 2)
-    assert pose_k[1, 0] == 30
-    assert pose_s[1] == 1.0
+    image = np.zeros((80, 60, 3), dtype=np.uint8)
+    est = build_pose_estimate(image, kpts, scores, [0, 0, 60, 80])
+    names = [item["name"] for item in est.keypoints]
+    assert "neck" not in names
+    assert "lsho" in names
+    assert "rwri" in names
+    assert est.notes == "dwpose.wholebody"
 
 
 def test_person_mask_covers_torso_not_corners():
     kpts, scores = _coco_standing()
-    pose_k, pose_s = coco17_to_openpose(kpts, scores)
-    mask = person_mask_from_pose(pose_k, pose_s, (80, 60), min_score=0.3, dilate_px=4)
+    mask = person_mask_from_pose(kpts, scores, (80, 60), min_score=0.3, dilate_px=4)
     assert int(mask[30, 30]) == 255
     assert int(mask[2, 2]) == 0
 
 
 def test_spread_limbs_do_not_fill_bed():
     kpts, scores = _coco_standing()
-    pose_k, pose_s = coco17_to_openpose(kpts, scores)
-    pose_k[4] = (58, 8)
-    pose_k[7] = (2, 8)
-    mask = person_mask_from_pose(pose_k, pose_s, (80, 60), min_score=0.3, dilate_px=2)
+    kpts[10] = (58, 8)  # rwri
+    kpts[9] = (2, 8)  # lwri
+    mask = person_mask_from_pose(kpts, scores, (80, 60), min_score=0.3, dilate_px=2)
     assert int(mask[40, 4]) == 0
     assert int(mask[34, 30]) == 255
+
+
+def test_wholebody_keeps_hands_on_arm_points():
+    kpts = np.zeros((133, 2), dtype=np.float32)
+    scores = np.zeros(133, dtype=np.float32)
+    body, body_s = _coco_standing()
+    kpts[:17] = body
+    scores[:17] = body_s
+    kpts[91] = (12, 48)
+    kpts[112] = (50, 48)
+    scores[91] = 1.0
+    scores[112] = 1.0
+    kpts[40] = (30, 22)
+    scores[40] = 1.0
+    image = np.zeros((80, 60, 3), dtype=np.uint8)
+    est = build_pose_estimate(image, kpts, scores, [0, 0, 60, 80], min_score=0.3)
+    names = {item["name"] for item in est.keypoints}
+    assert "lhand_00" in names
+    assert "rhand_00" in names
+    assert est.points["arm_l"][-1] == (12.0, 48.0)
+    assert est.points["arm_r"][-1] == (50.0, 48.0)
+    _x0, y0, _x1, y1 = est.boxes["face"]
+    assert y1 - y0 > 12
 
 
 def test_clip_character_drops_furniture():

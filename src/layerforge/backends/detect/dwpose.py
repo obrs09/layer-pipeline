@@ -1,7 +1,7 @@
 """DWPose (YOLOX + RTMPose wholebody) as a PoseEstimator.
 
-Hints only: clip the character cut to the person, and feed part boxes/points
-to SAM. Inventory still comes from WDTagger.
+Hints only: boxes/points for SAM. Inventory still comes from WDTagger.
+Native COCO-17 + wholebody 133 (feet/face/hands). Not converted to OpenPose-18.
 """
 
 from __future__ import annotations
@@ -16,56 +16,94 @@ from layerforge.config import resolve_path
 from layerforge.ops.morph import dilate_mask
 from layerforge.ops.normalize import to_rgba
 
-# OpenPose-18 after COCO-17 conversion.
-OPENPOSE_NAMES = [
+# RTMPose wholebody / DWPose: 17 body + 6 foot + 68 face + 21 Lhand + 21 Rhand.
+COCO17_NAMES = (
     "nose",
-    "neck",
-    "rsho",
-    "relb",
-    "rwri",
-    "lsho",
-    "lelb",
-    "lwri",
-    "rhip",
-    "rknee",
-    "rank",
-    "lhip",
-    "lknee",
-    "lank",
-    "reye",
     "leye",
-    "rear",
+    "reye",
     "lear",
-]
-OPENPOSE_LIMBS = [
+    "rear",
+    "lsho",
+    "rsho",
+    "lelb",
+    "relb",
+    "lwri",
+    "rwri",
+    "lhip",
+    "rhip",
+    "lknee",
+    "rknee",
+    "lank",
+    "rank",
+)
+FEET_NAMES = ("lbigtoe", "lsmalltoe", "lheel", "rbigtoe", "rsmalltoe", "rheel")
+COCO17_LIMBS = (
+    (0, 1),
+    (0, 2),
+    (1, 3),
+    (2, 4),
+    (5, 6),
+    (5, 7),
+    (7, 9),
+    (6, 8),
+    (8, 10),
+    (5, 11),
+    (6, 12),
+    (11, 12),
+    (11, 13),
+    (13, 15),
+    (12, 14),
+    (14, 16),
+)
+HAND_LIMBS = (
+    (0, 1),
     (1, 2),
-    (1, 5),
     (2, 3),
     (3, 4),
+    (0, 5),
     (5, 6),
     (6, 7),
-    (1, 8),
-    (8, 9),
+    (7, 8),
+    (0, 9),
     (9, 10),
-    (1, 11),
+    (10, 11),
     (11, 12),
-    (12, 13),
-    (1, 0),
-    (0, 14),
-    (14, 16),
-    (0, 15),
-    (15, 17),
-    (2, 5),
-    (8, 11),
-]
-TORSO_IDX = (1, 2, 5, 8, 11)
-HEAD_IDX = (0, 1, 14, 15, 16, 17)
+    (0, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (0, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+)
+LEFT_HAND0 = 91
+RIGHT_HAND0 = 112
+FACE0 = 23
+TORSO_IDX = (5, 6, 11, 12)
+HEAD_IDX = (0, 1, 2, 3, 4)
 ROLE_KPTS = {
-    "face": (0, 1, 14, 15, 16, 17),
-    "body": (1, 2, 5, 8, 9, 10, 11, 12, 13),
-    "arm_r": (2, 3, 4),
-    "arm_l": (5, 6, 7),
+    "face": tuple(HEAD_IDX) + tuple(range(FACE0, LEFT_HAND0)),
+    "body": (5, 6, 11, 12, 13, 14, 15, 16),
+    "arm_r": (6, 8, 10),
+    "arm_l": (5, 7, 9),
 }
+ROLE_POINT_EXTRA = {
+    "arm_l": (LEFT_HAND0,),
+    "arm_r": (RIGHT_HAND0,),
+}
+
+
+def keypoint_name(index: int) -> str:
+    if index < 17:
+        return COCO17_NAMES[index]
+    if index < 23:
+        return FEET_NAMES[index - 17]
+    if index < LEFT_HAND0:
+        return f"face_{index - FACE0:02d}"
+    if index < RIGHT_HAND0:
+        return f"lhand_{index - LEFT_HAND0:02d}"
+    return f"rhand_{index - RIGHT_HAND0:02d}"
 
 
 @dataclass
@@ -77,25 +115,6 @@ class PoseEstimate:
     overlay: np.ndarray
     person_box: list[float] = field(default_factory=list)
     notes: str = ""
-
-
-def coco17_to_openpose(kpts: np.ndarray, scores: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """COCO-17 (or wholebody-133 prefix) → OpenPose-18 with a derived neck."""
-    body = np.asarray(kpts[:17], dtype=np.float32)
-    sc = np.asarray(scores[:17], dtype=np.float32)
-    neck = (body[5] + body[6]) * 0.5
-    neck_s = float(min(sc[5], sc[6]))
-    order = [0, None, 6, 8, 10, 5, 7, 9, 12, 14, 16, 11, 13, 15, 2, 1, 4, 3]
-    out_k = np.zeros((18, 2), dtype=np.float32)
-    out_s = np.zeros(18, dtype=np.float32)
-    for i, src in enumerate(order):
-        if src is None:
-            out_k[i] = neck
-            out_s[i] = neck_s
-        else:
-            out_k[i] = body[src]
-            out_s[i] = sc[src]
-    return out_k, out_s
 
 
 def person_mask_from_pose(
@@ -112,7 +131,7 @@ def person_mask_from_pose(
     pts = np.asarray(kpts, dtype=np.float32)
     sc = np.asarray(scores, dtype=np.float32)
     thick = max(10, int(0.045 * max(h, w)))
-    for a, b in OPENPOSE_LIMBS:
+    for a, b in COCO17_LIMBS:
         if a >= len(pts) or b >= len(pts):
             continue
         if sc[a] < min_score or sc[b] < min_score:
@@ -189,14 +208,27 @@ def part_points_from_pose(
 ) -> dict[str, list[tuple[float, float]]]:
     points: dict[str, list[tuple[float, float]]] = {}
     for role, idxs in ROLE_KPTS.items():
+        extra = ROLE_POINT_EXTRA.get(role, ())
         pts = []
-        for i in idxs:
+        for i in (*idxs, *extra):
             if i >= len(kpts) or scores[i] < min_score:
                 continue
             pts.append((float(kpts[i, 0]), float(kpts[i, 1])))
         if pts:
             points[role] = pts
     return points
+
+
+def _draw_limbs(rgb, kpts, scores, limbs, offset, colors, thick, min_score):
+    for i, (a, b) in enumerate(limbs):
+        ia, ib = a + offset, b + offset
+        if ia >= len(kpts) or ib >= len(kpts):
+            continue
+        if scores[ia] < min_score or scores[ib] < min_score:
+            continue
+        pa = (int(round(kpts[ia, 0])), int(round(kpts[ia, 1])))
+        pb = (int(round(kpts[ib, 0])), int(round(kpts[ib, 1])))
+        cv2.line(rgb, pa, pb, colors[i % len(colors)], thick, cv2.LINE_AA)
 
 
 def draw_pose_overlay(
@@ -207,7 +239,25 @@ def draw_pose_overlay(
     min_score: float = 0.3,
 ) -> np.ndarray:
     rgb = to_rgba(image)[:, :, :3].copy()
-    colors = [
+    body_colors = [
+        (255, 0, 0),
+        (255, 85, 0),
+        (255, 170, 0),
+        (255, 255, 0),
+        (170, 255, 0),
+        (85, 255, 0),
+        (0, 255, 0),
+        (0, 255, 85),
+        (0, 255, 170),
+        (0, 255, 255),
+        (0, 170, 255),
+        (0, 85, 255),
+        (0, 0, 255),
+        (85, 0, 255),
+        (170, 0, 255),
+        (255, 0, 255),
+    ]
+    hand_colors = [
         (255, 0, 0),
         (255, 85, 0),
         (255, 170, 0),
@@ -226,20 +276,27 @@ def draw_pose_overlay(
         (255, 0, 255),
         (255, 0, 170),
         (255, 0, 85),
+        (255, 128, 0),
+        (128, 255, 0),
     ]
     thick = max(2, int(0.004 * max(rgb.shape[0], rgb.shape[1])))
-    for i, (a, b) in enumerate(OPENPOSE_LIMBS):
-        if a >= len(kpts) or b >= len(kpts):
+    _draw_limbs(rgb, kpts, scores, COCO17_LIMBS, 0, body_colors, thick, min_score)
+    _draw_limbs(rgb, kpts, scores, HAND_LIMBS, LEFT_HAND0, hand_colors, max(1, thick - 1), min_score)
+    _draw_limbs(rgb, kpts, scores, HAND_LIMBS, RIGHT_HAND0, hand_colors, max(1, thick - 1), min_score)
+    n = min(len(kpts), len(scores))
+    for i in range(n):
+        if scores[i] < min_score:
             continue
-        if scores[a] < min_score or scores[b] < min_score:
-            continue
-        pa = (int(round(kpts[a, 0])), int(round(kpts[a, 1])))
-        pb = (int(round(kpts[b, 0])), int(round(kpts[b, 1])))
-        cv2.line(rgb, pa, pb, colors[i % len(colors)], thick, cv2.LINE_AA)
-    for i, ((x, y), score) in enumerate(zip(kpts, scores)):
-        if score < min_score:
-            continue
-        cv2.circle(rgb, (int(round(x)), int(round(y))), thick + 2, colors[i % len(colors)], -1)
+        if FACE0 <= i < LEFT_HAND0:
+            color = (255, 255, 255)
+            radius = max(1, thick)
+        elif i >= LEFT_HAND0:
+            color = hand_colors[i % len(hand_colors)]
+            radius = thick + 1
+        else:
+            color = body_colors[i % len(body_colors)]
+            radius = thick + 2
+        cv2.circle(rgb, (int(round(kpts[i, 0])), int(round(kpts[i, 1]))), radius, color, -1)
     return rgb
 
 
@@ -269,17 +326,19 @@ def build_pose_estimate(
     dilate_px: int = 72,
 ) -> PoseEstimate:
     h, w = image.shape[:2]
-    pose_k, pose_s = coco17_to_openpose(kpts, scores)
+    pose_k = np.asarray(kpts, dtype=np.float32)
+    pose_s = np.asarray(scores, dtype=np.float32)
     person = person_mask_from_pose(pose_k, pose_s, (h, w), min_score=min_score, dilate_px=dilate_px)
     overlay = draw_pose_overlay(image, pose_k, pose_s, min_score=min_score)
     named = [
         {
-            "name": OPENPOSE_NAMES[i],
+            "name": keypoint_name(i),
             "x": round(float(pose_k[i, 0]), 1),
             "y": round(float(pose_k[i, 1]), 1),
             "score": round(float(pose_s[i]), 4),
         }
         for i in range(len(pose_k))
+        if float(pose_s[i]) >= min_score * 0.5
     ]
     return PoseEstimate(
         person_mask=person,
@@ -288,6 +347,7 @@ def build_pose_estimate(
         points=part_points_from_pose(pose_k, pose_s, min_score=min_score),
         overlay=overlay,
         person_box=[float(v) for v in person_box],
+        notes="dwpose.wholebody",
     )
 
 
