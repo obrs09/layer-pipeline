@@ -482,10 +482,7 @@ def test_hair_split_front_from_face_zone():
                 "hair_split": {
                     "enabled": True,
                     "face_dilate_px": 2,
-                    "up_frac": 0.4,
-                    "face_height_frac": 0.55,
                     "min_front_px": 16,
-                    "min_back_px": 16,
                 }
             }
         },
@@ -497,14 +494,18 @@ def test_hair_split_front_from_face_zone():
         LayerMask(role="hair_back", label="hair", visible=hair_vis.copy(), source="sam"),
         LayerMask(role="face", label="face", visible=face_vis, source="sam"),
     ]
-    cascade._punch_face_from_hair(kept)
+    before = hair_vis.copy()
     cascade._split_hair_front(kept)
     by_role = {layer.role: layer for layer in kept}
     assert "hair_front" in by_role
-    assert int(by_role["hair_front"].visible[12, 30]) == 255
+    # copy only: whole hair is unchanged, including under the face
+    assert np.array_equal(by_role["hair_back"].visible, before)
+    assert int(by_role["hair_back"].visible[30, 30]) == 255
     assert int(by_role["hair_back"].visible[48, 30]) == 255
-    assert int(by_role["hair_back"].visible[30, 30]) == 0
-    assert int(by_role["hair_front"].visible[30, 30]) == 0
+    # front is hair ∩ dilated face, not a filled face box
+    assert int(by_role["hair_front"].visible[30, 30]) == 255
+    assert int(by_role["hair_front"].visible[12, 30]) == 0
+    assert int(by_role["hair_front"].visible[48, 30]) == 0
 
 
 def test_hair_split_skipped_when_disabled():

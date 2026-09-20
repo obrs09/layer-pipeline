@@ -150,7 +150,6 @@ class CascadeSegment:
             if layer is not None:
                 kept.append(layer)
                 if role == "face":
-                    self._punch_face_from_hair(kept)
                     self._split_hair_front(kept)
             elif spec.required or spec.required_if_tags:
                 self._mark_missing(role)
@@ -160,7 +159,6 @@ class CascadeSegment:
             for bucket in (self.missing, self.needs_click):
                 if "hair_back" in bucket:
                     bucket.remove("hair_back")
-        self._punch_face_from_hair(kept)
         self._split_hair_front(kept)
         if "hair_front" in inventory and not any(layer.role == "hair_front" for layer in kept):
             self._mark_missing("hair_front")
@@ -249,7 +247,6 @@ class CascadeSegment:
                         kept.append(layer)
                         continue
                 self._mark_missing(role)
-        self._punch_face_from_hair(kept)
         self._split_hair_front(kept)
         kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
@@ -798,22 +795,8 @@ class CascadeSegment:
         if role not in self.needs_click:
             self.needs_click.append(role)
 
-    def _punch_face_from_hair(self, kept: list[LayerMask]) -> None:
-        face = next((layer for layer in kept if layer.role == "face" and int((layer.visible > 0).sum()) > 0), None)
-        if face is None:
-            return
-        face_vis = face.visible > 0
-        for layer in kept:
-            if layer.role != "hair_back":
-                continue
-            remain = (layer.visible > 0) & ~face_vis
-            if int(remain.sum()) < 16:
-                continue
-            layer.visible = remain.astype(np.uint8) * 255
-            layer.notes = _join_notes(layer.notes, "punched face")
-
     def _split_hair_front(self, kept: list[LayerMask]) -> None:
-        """Peel bangs from whole hair by overlap with the face, not by color."""
+        """Copy bangs from whole hair. Never punch the face box or mask out of hair_back."""
         split_cfg = (self.cfg.get("cascade") or {}).get("hair_split") or {}
         if not bool(split_cfg.get("enabled", True)):
             return
@@ -826,33 +809,18 @@ class CascadeSegment:
         if hair is None or face is None:
             return
         dilate_px = int(split_cfg.get("face_dilate_px", 8))
-        up_frac = float(split_cfg.get("up_frac", 0.45))
-        height_frac = float(split_cfg.get("face_height_frac", 0.55))
         min_front = int(split_cfg.get("min_front_px", 32))
-        min_back = int(split_cfg.get("min_back_px", 64))
         zone = dilate_mask(face.visible, dilate_px) > 0
-        x, y, bw, bh = face.bbox
-        h, w = hair.visible.shape
-        y0 = max(0, int(round(y - bh * up_frac)))
-        y1 = min(h, int(round(y + bh * height_frac)))
-        x0 = max(0, int(round(x - bw * 0.08)))
-        x1 = min(w, int(round(x + bw * 1.08)))
-        if x1 > x0 and y1 > y0:
-            zone[y0:y1, x0:x1] = True
         hair_vis = hair.visible > 0
         front = hair_vis & zone
-        back = hair_vis & ~zone
         if int(front.sum()) < min_front:
             return
-        if int(back.sum()) >= min_back:
-            hair.visible = back.astype(np.uint8) * 255
-            hair.notes = _join_notes(hair.notes, "hair_split remainder")
         kept.append(
             _layer(
                 "hair_front",
                 front.astype(np.uint8) * 255,
                 hair.score,
-                "hair_split whole hair ∩ face zone",
+                "hair_split copy of whole hair ∩ dilated face",
             )
         )
         for bucket in (self.missing, self.needs_click):
@@ -864,8 +832,8 @@ class CascadeSegment:
                 {
                     "applied": True,
                     "front_px": int(front.sum()),
-                    "back_px": int(back.sum()),
-                    "peeled": int(back.sum()) >= min_back,
+                    "back_px": int(hair_vis.sum()),
+                    "peeled": False,
                 },
             )
 

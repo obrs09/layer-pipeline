@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 切脸不再抠坏整发图
+
+- 做了：方块是拆前发时把脸的 **DINO/bbox 矩形** 从 `hair_back` 挖掉，再加上按脸 mask 打孔。现已删掉 `_punch_face_from_hair`；`hair_front` 只 **复制** `整发 ∩ 膨胀脸`，不再填矩形、不再改 `hair_back`。04_segment 的整发 dump 是 SAM 原切。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（138 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/296a4352/steps/04_segment/01_hair_back.png` 完整蓝发，没有方块。`hair_split.json` `peeled: false`。`missing`：6 张 `[]`
+- 未做 / 已知缺陷：前发只剩贴脸一圈（296 front=7503）。4034 整发 SAM 本身带着脸，不是后抠的。refine mutex 仍会按优先级从 hair_back 可见区让出脸（05_refine 有脸形洞，不是方块）。458/640 整发 SAM 仍失败。908 `arm_l` 仍切不出。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 脸走裁块放大 SAM2；整发后几何拆前后发
 
 - 做了：切序改成衣服 → 整发（`hair_back` query）→ 脸 → 眼/嘴。脸在 DINO 框上 pad+放大（短边 ≥1024）再 SAM2，裁完立刻恢复全图 embedding。整发收下后面孔，再按脸膨胀 + 额头区几何拆 `hair_front`。邻域负点避开脸框。`sam_crop.roles` 只留 `face`（眼/嘴裁块会把框坐标当全图，296 眼、908 嘴被切成整个人）。`face_split` 仍关，不切脖子。**没改 schema、没改 .venv**
