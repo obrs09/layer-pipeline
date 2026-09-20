@@ -27,7 +27,8 @@ roles:
     required_if_tags: [long_hair, ponytail, twintails, braid, hair_over_shoulder, white_hair, silver_hair, grey_hair, short_hair]
     skip_if_tags: [bald]
     tag_names: [long_hair, ponytail, twintails, white_hair]
-    queries: ["hair", "anime hair", "long hair", "back hair"]
+    # Whole-hair DINO/SAM prompts. Not back hair / bangs / front hair.
+    queries: ["hair", "anime hair", "long hair"]
     # clothes is cut first; a negative point on it stops SAM returning the whole figure.
     exclude_roles: [face, hair_front, clothes]
     aliases: [hair-back, long-hair-back]

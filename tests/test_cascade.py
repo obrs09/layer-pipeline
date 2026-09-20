@@ -508,6 +508,53 @@ def test_hair_split_front_from_face_zone():
     assert int(by_role["hair_front"].visible[48, 30]) == 0
 
 
+def test_whole_hair_dump_written():
+    class _Dump:
+        def __init__(self):
+            self.pngs: dict[str, np.ndarray] = {}
+            self.jsons: dict[str, object] = {}
+
+        def write_png(self, rel, array):
+            self.pngs[rel] = array
+
+        def write_json(self, rel, payload):
+            self.jsons[rel] = payload
+
+    hair = LayerMask(role="hair_back", label="hair", visible=_blob(40, 40, 4, 6, 28, 30), source="sam")
+    dump = _Dump()
+    cascade = CascadeSegment({}, load_taxonomy())
+    cascade.bind_dump(dump)
+    cascade._dump_hair_whole(np.full((40, 40, 4), 30, dtype=np.uint8), hair)
+    assert "04_segment/hair_whole.png" in dump.pngs
+    assert "04_segment/hair_whole.mask.png" in dump.pngs
+    assert dump.jsons["04_segment/hair_whole.json"]["px"] == int((hair.visible > 0).sum())
+
+
+def test_whole_hair_cut_does_not_query_back_hair():
+    dino = _Dino(
+        {
+            "hair": [[6, 4, 42, 36]],
+            "anime clothes": [[8, 20, 40, 44]],
+            "anime face": [[14, 8, 34, 26]],
+            "face": [[14, 8, 34, 26]],
+        }
+    )
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99, "long_hair": 0.9}),
+        boxes=dino,
+        sam2=_Sam2(fill_box=True),
+    )
+    cascade.segment(_image(), SegmentHints())
+    queried = [query for call in dino.calls for query in call]
+    assert "hair" in queried
+    assert "back hair" not in queried
+    assert "bangs" not in queried
+    assert "front hair" not in queried
+
+
 def test_hair_split_skipped_when_disabled():
     h, w = 40, 40
     hair = LayerMask(role="hair_back", label="hair", visible=_blob(h, w, 2, 4, 30, 36), source="sam")

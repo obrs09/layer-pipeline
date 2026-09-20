@@ -13,6 +13,7 @@ from layerforge.ops.character_qa import (
 from layerforge.ops.face_split import split_face_colors
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
+from layerforge.ops.trace import masked_rgba
 from layerforge.ops.usable import usable
 from layerforge.taxonomy import Taxonomy, _norm_tag, load_taxonomy
 
@@ -149,6 +150,8 @@ class CascadeSegment:
             layer = self._cut_one(image, character, role, kept)
             if layer is not None:
                 kept.append(layer)
+                if role == "hair_back":
+                    self._dump_hair_whole(image, layer)
                 if role == "face":
                     self._split_hair_front(kept)
             elif spec.required or spec.required_if_tags:
@@ -156,6 +159,7 @@ class CascadeSegment:
         hair = self._hair_from_residual(character, kept)
         if hair is not None:
             kept.append(hair)
+            self._dump_hair_whole(image, hair)
             for bucket in (self.missing, self.needs_click):
                 if "hair_back" in bucket:
                     bucket.remove("hair_back")
@@ -247,6 +251,9 @@ class CascadeSegment:
                         kept.append(layer)
                         continue
                 self._mark_missing(role)
+        hair = next((layer for layer in kept if layer.role == "hair_back"), None)
+        if hair is not None:
+            self._dump_hair_whole(image, hair)
         self._split_hair_front(kept)
         kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
@@ -794,6 +801,24 @@ class CascadeSegment:
             self.missing.append(role)
         if role not in self.needs_click:
             self.needs_click.append(role)
+
+    def _dump_hair_whole(self, image: np.ndarray, layer: LayerMask) -> None:
+        """Keep the SAM/residual whole-hair cut even after later front/back copies."""
+        if self.dump is None or layer is None:
+            return
+        if int((layer.visible > 0).sum()) < 1:
+            return
+        self.dump.write_png("04_segment/hair_whole.mask.png", layer.visible)
+        self.dump.write_png("04_segment/hair_whole.png", masked_rgba(image, layer.visible))
+        self.dump.write_json(
+            "04_segment/hair_whole.json",
+            {
+                "role": layer.role,
+                "source": layer.source,
+                "notes": layer.notes,
+                "px": int((layer.visible > 0).sum()),
+            },
+        )
 
     def _split_hair_front(self, kept: list[LayerMask]) -> None:
         """Copy bangs from whole hair. Never punch the face box or mask out of hair_back."""

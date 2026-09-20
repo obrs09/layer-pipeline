@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 整发只用 hair query，并单独落盘
+
+- 做了：整发仍走 SAM2 + Grounding DINO，但 `hair_back.queries` 改成 `hair` / `anime hair` / `long hair`，去掉 `back hair`。前发 query（bangs / front hair）仍不跑。切开当时把整发写成 `04_segment/hair_whole.png` + mask + json。包里角色名仍是 `hair_back`（order 10），**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（141 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/hair_whole.png`。6 张都有。296/4034/908/a163 命中 `query=hair`。458/640 整发 SAM 失败，hair_whole 是残差。`missing`：6 张 `[]`
+- 未做 / 已知缺陷：没有新增 `hair` 角色。458/640 仍切不出 SAM 整发。refine mutex 仍会从 hair_back 可见区让出脸。908 `arm_l` 仍切不出。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 切脸不再抠坏整发图
 
 - 做了：方块是拆前发时把脸的 **DINO/bbox 矩形** 从 `hair_back` 挖掉，再加上按脸 mask 打孔。现已删掉 `_punch_face_from_hair`；`hair_front` 只 **复制** `整发 ∩ 膨胀脸`，不再填矩形、不再改 `hair_back`。04_segment 的整发 dump 是 SAM 原切。**没改 schema、没改 .venv**

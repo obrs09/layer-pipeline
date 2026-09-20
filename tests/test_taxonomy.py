@@ -7,6 +7,14 @@ import pytest
 from layerforge.taxonomy import load_taxonomy
 
 
+def test_whole_hair_queries_are_not_back_or_bangs():
+    spec = load_taxonomy().spec("hair_back")
+    assert spec.queries == ("hair", "anime hair", "long hair")
+    assert "back hair" not in spec.queries
+    assert "bangs" not in spec.queries
+    assert "front hair" not in spec.queries
+
+
 def test_occluders_sit_above_the_layer_they_cover():
     taxonomy = load_taxonomy()
     for role in taxonomy.roles.values():
