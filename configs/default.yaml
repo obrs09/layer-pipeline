@@ -23,9 +23,9 @@ cascade:
   # Residual hair must touch the head zone. Wrist discs split held props off that blob.
   hair_punch_pose_roles: [arm_l, arm_r]
   hair_punch_pose_pad: 48
-  # After face + eyes + mouth: punch overlays, split remaining by color.
+  # Off: Lab/grow/edge peel of hair from the SAM face did more harm than good.
   face_split:
-    enabled: true
+    enabled: false
     expand_px: 1
     punch_roles: [eye_l, eye_r, mouth]
     neck_role: neck

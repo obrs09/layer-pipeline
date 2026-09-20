@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 关掉按颜色拆脸，退回 SAM 脸
+
+- 做了：`cascade.face_split.enabled: false`。不再对 SAM 脸做 Lab / 区域生长 / 线稿停边 / 切脖子。`01_face` 回到切件当时的 mask。拆脸代码和测试还在，YAML 打开即可。refine 仍不把眼/嘴洞填回脸。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（131 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/01_face.png`（不再写 `face_split.json`）。脸是完整 SAM 切件，带眼/嘴。`missing`：640 `[hair_front]`，其余 `[]`
+- 未做 / 已知缺陷：脸上沾发回到拆颜色之前（4034 / a163 刘海仍在 face 上）。640 再次缺 `hair_front`。脖子层不再从脸里切。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 线稿停生长；暂时不切脖子
 
 - 做了：生长遇 Canny 线稿停步（`edge_stop`，`canny_low/high` 50/120），种子上的边仍保留。`cut_neck: false`：不再按下巴宽度收窄切脖子，下巴留在脸上。`cut_neck: true` 仍可打开旧逻辑。**没改 schema、没改 .venv**
