@@ -89,6 +89,11 @@ def usable(
             box_mask = np.zeros_like(vis)
             box_mask[y0:y1, x0:x1] = True
             box_area = max(1, int(box_mask.sum()))
+            if spec.cover_in_character:
+                # Held props hang past the silhouette; only the box inside the character can be covered.
+                coverable = int((box_mask & char).sum())
+                if coverable >= 16:
+                    box_area = coverable
             cover = int((vis & box_mask).sum()) / box_area
             out_frac = 1.0 - (int((vis & box_mask).sum()) / max(1, area))
             if cover < spec.min_box_cover:

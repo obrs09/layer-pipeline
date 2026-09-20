@@ -5,11 +5,15 @@ from dataclasses import replace
 import numpy as np
 
 from layerforge.backends.segment.base import LayerMask, SegmentHints
-from layerforge.ops.character_qa import choose_peer_character, evaluate_character_qa
+from layerforge.ops.character_qa import (
+    choose_peer_character,
+    evaluate_character_qa,
+    peers_agree_isnet_outlier,
+)
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.usable import usable
-from layerforge.taxonomy import Taxonomy, load_taxonomy
+from layerforge.taxonomy import Taxonomy, _norm_tag, load_taxonomy
 
 
 class CascadeSegment:
@@ -52,6 +56,7 @@ class CascadeSegment:
         self.tag_threshold = float(cascade_cfg.get("tag_threshold", 0.35))
         refine_cfg = cfg.get("refine") or {}
         self.morph_open_px = int(refine_cfg.get("morph_open_px", 2))
+        self.hair_reach = float(cascade_cfg.get("hair_reach", 0.6))
         self.missing: list[str] = []
         self.needs_click: list[str] = []
         self.inventory: list[str] = []
@@ -136,6 +141,12 @@ class CascadeSegment:
                 kept.append(layer)
             elif spec.required or spec.required_if_tags:
                 self._mark_missing(role)
+        hair = self._hair_from_residual(character, kept)
+        if hair is not None:
+            kept.append(hair)
+            for bucket in (self.missing, self.needs_click):
+                if "hair_back" in bucket:
+                    bucket.remove("hair_back")
         if "body" in inventory:
             body = self._body_from_residual(character, kept, image)
             if body is not None:
@@ -247,12 +258,16 @@ class CascadeSegment:
                 flagged = False
                 break
             flagged = True
+            if peers_agree_isnet_outlier(mask, peers, qa_cfg):
+                # Another threshold/noise variant cannot close a structural gap.
+                attempts[-1]["skipped_retries"] = "peers agree with each other; isnet is the outlier"
+                break
         if last_mask is None or int((last_mask > 0).sum()) < 64:
             raise RuntimeError("anime-segmentation produced an empty character mask.")
         source = "anime_segmentation"
         peer_replace = None
         isnet_mask = last_mask
-        choice = choose_peer_character(isnet_mask, peers, qa_cfg)
+        choice = choose_peer_character(isnet_mask, peers, qa_cfg, prob=last_prob)
         if choice is not None:
             last_mask = choice["mask"]
             last_prob = (last_mask > 0).astype(np.float32)
@@ -564,9 +579,19 @@ class CascadeSegment:
         spec = self.taxonomy.spec("acc")
         if self.boxes is None or self.sam2 is None:
             return []
-        detections = self.boxes.detect(image, list(spec.queries), self.dino_threshold)
+        thresh = spec.tag_threshold if spec.tag_threshold > 0 else self.tag_threshold
+        scores = {_norm_tag(name): float(score) for name, score in self.tags.items()}
+        base_gate = spec.required_if_tags or spec.tag_names
+        queries: list[str] = []
+        if not base_gate or any(scores.get(tag, 0.0) >= thresh for tag in base_gate):
+            queries.extend(spec.queries)
+        queries.extend(q for q in spec.fired_queries(self.tags, thresh) if q not in queries)
+        if not queries:
+            return []
+        detections = self.boxes.detect(image, queries, self.dino_threshold)
         layers: list[LayerMask] = []
-        for _query, xyxy, _score in detections[:8]:
+        for query, xyxy, _score in detections[:8]:
+            self._trace_box("acc", query, xyxy, detections)
             pos = [_box_center(xyxy)]
             neg = _neighbor_negatives(others + layers, spec.exclude_roles)
             mask, sam_score = self.sam2.predict_box_points(xyxy, pos, neg)
@@ -575,11 +600,90 @@ class CascadeSegment:
             mask = _constrain_mask(mask, character, xyxy)
             result = usable(mask, spec, character, others + layers, xyxy)
             if not result.ok:
+                self._record_failure("acc", [f"query={query}", *result.reasons])
                 continue
             layers.append(
-                _layer("acc", result.mask, min(result.score, float(sam_score)), "sam2.box acc")
+                _layer("acc", result.mask, min(result.score, float(sam_score)), f"sam2.box acc query={query}")
             )
         return layers
+
+    def _hair_from_residual(
+        self,
+        character: np.ndarray,
+        others: list[LayerMask],
+    ) -> LayerMask | None:
+        """Hair the detectors wanted but SAM could not cut: leftover character pixels around the head.
+
+        Only runs when a hair role is in the inventory and no hair layer exists. Keeps
+        residual components that touch the head zone (face grown by hair_reach) or sit
+        inside a traced hair box. Everything else stays for the body residual.
+        """
+        have = {layer.role for layer in others}
+        wanted = [
+            role
+            for role in ("hair_back", "hair_front")
+            if role in self.inventory and role not in have
+        ]
+        if not wanted:
+            return None
+        faces = [layer for layer in others if layer.role == "face" and int((layer.visible > 0).sum()) > 0]
+        spec = self.taxonomy.spec("hair_back")
+        hair_boxes = [
+            item["xyxy"]
+            for item in self.debug_boxes
+            if item.get("role") in ("hair_back", "hair_front")
+            and item.get("xyxy")
+            and _box_character_frac(item["xyxy"], character) <= spec.max_area_frac
+        ]
+        if not faces and not hair_boxes:
+            return None
+        claimed = np.zeros(character.shape, dtype=bool)
+        for layer in others:
+            if self.taxonomy.spec(layer.role).overlay:
+                continue
+            claimed |= layer.visible > 0
+        residual = morph_open(((character > 0) & ~claimed).astype(np.uint8) * 255, self.morph_open_px) > 0
+        if not residual.any():
+            return None
+        head_zone = np.zeros(character.shape, dtype=bool)
+        for face in faces:
+            _x, _y, _w, face_h = face.bbox
+            reach = max(8, int(round(face_h * self.hair_reach)))
+            head_zone |= dilate_mask(face.visible, reach) > 0
+        # Hair lives around the head or inside a traced hair box. Clip first so a thin
+        # unclaimed rim along the silhouette cannot chain a staff or hem onto the hair.
+        region = head_zone.copy()
+        h, w = character.shape
+        for x0, y0, x1, y1 in hair_boxes:
+            x0, y0 = max(0, int(x0) - 12), max(0, int(y0) - 12)
+            x1, y1 = min(w, int(x1) + 12), min(h, int(y1) + 12)
+            if x1 > x0 and y1 > y0:
+                region[y0:y1, x0:x1] = True
+        candidate = residual & region
+        import cv2
+
+        n, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            candidate.astype(np.uint8), connectivity=8
+        )
+        hair = np.zeros(character.shape, dtype=bool)
+        char_area = max(1, int((character > 0).sum()))
+        for k in range(1, n):
+            area = int(stats[k, cv2.CC_STAT_AREA])
+            if area < max(64, int(0.002 * char_area)):
+                continue
+            comp = labels == k
+            touches_head = bool((comp & head_zone).any())
+            cx, cy = centroids[k]
+            in_box = any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in hair_boxes)
+            if touches_head or in_box:
+                hair |= comp
+        if int(hair.sum()) < 64:
+            return None
+        result = usable(hair.astype(np.uint8) * 255, spec, character, others, None)
+        if not result.ok:
+            self._record_failure("hair_back", ["residual", *result.reasons])
+            return None
+        return _layer("hair_back", result.mask, 0.5, "character residual around head; SAM hair cut failed")
 
     def _body_from_residual(
         self,
@@ -677,6 +781,18 @@ class CascadeSegment:
         if self.dump is None or not self.cut_failures:
             return
         self.dump.write_json("04_segment/failures.json", self.cut_failures)
+
+
+def _box_character_frac(box: list[float], character: np.ndarray) -> float:
+    """Share of the character mask that falls inside the box."""
+    char = character > 0
+    h, w = char.shape
+    x0, y0, x1, y1 = [int(round(float(v))) for v in box]
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(w, x1), min(h, y1)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    return float(char[y0:y1, x0:x1].sum() / max(1, int(char.sum())))
 
 
 def _constrain_mask(mask: np.ndarray, character: np.ndarray, box: list[float] | None, pad: int = 12) -> np.ndarray:

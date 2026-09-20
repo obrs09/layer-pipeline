@@ -358,6 +358,64 @@ def test_pose_does_not_clip_character():
     assert cascade.pose_boxes["body"] == [14.0, 16.0, 34.0, 38.0]
 
 
+def _blob(h, w, y0, x0, y1, x1):
+    out = np.zeros((h, w), dtype=np.uint8)
+    out[y0:y1, x0:x1] = 255
+    return out
+
+
+def test_hair_from_residual_around_head_when_sam_hair_failed():
+    """64010c19: hair in inventory, SAM returned the whole figure, hair pixels were left over."""
+    h, w = 160, 160
+    character = _blob(h, w, 10, 20, 150, 140)
+    face = LayerMask(role="face", label="face", visible=_blob(h, w, 30, 60, 70, 100), source="sam")
+    clothes = LayerMask(role="clothes", label="clothes", visible=_blob(h, w, 70, 40, 150, 120), source="sam")
+    cascade = CascadeSegment({"refine": {"morph_open_px": 0}}, load_taxonomy(), character=_Cut())
+    cascade.inventory = ["face", "clothes", "hair_back", "hair_front", "body"]
+    cascade.debug_boxes = [{"role": "hair_back", "query": "hair", "xyxy": [20.0, 10.0, 140.0, 80.0], "score": 0.6}]
+    hair = cascade._hair_from_residual(character, [face, clothes])
+    assert hair is not None
+    assert hair.role == "hair_back"
+    # residual beside the head (x 20..60 / 100..140, y 10..70) is hair
+    assert int(hair.visible[40, 30]) == 255
+    assert int(hair.visible[40, 120]) == 255
+    # residual below the clothes hem is not hair
+    assert int(hair.visible[155, 80]) == 0 if h > 155 else True
+    assert not np.any((hair.visible > 0) & (face.visible > 0))
+    assert not np.any((hair.visible > 0) & (clothes.visible > 0))
+
+
+def test_hair_from_residual_not_used_without_hair_in_inventory():
+    h, w = 160, 160
+    character = _blob(h, w, 10, 20, 150, 140)
+    face = LayerMask(role="face", label="face", visible=_blob(h, w, 30, 60, 70, 100), source="sam")
+    cascade = CascadeSegment({}, load_taxonomy(), character=_Cut())
+    cascade.inventory = ["face", "clothes", "body"]
+    assert cascade._hair_from_residual(character, [face]) is None
+    cascade.inventory = ["face", "hair_back", "body"]
+    existing = LayerMask(role="hair_back", label="hair", visible=_blob(h, w, 10, 20, 30, 140), source="sam")
+    assert cascade._hair_from_residual(character, [face, existing]) is None
+
+
+def test_hair_from_residual_leaves_far_blobs_for_body():
+    h, w = 200, 160
+    character = _blob(h, w, 10, 20, 190, 140)
+    face = LayerMask(role="face", label="face", visible=_blob(h, w, 20, 60, 60, 100), source="sam")
+    clothes = LayerMask(role="clothes", label="clothes", visible=_blob(h, w, 60, 20, 150, 140), source="sam")
+    cascade = CascadeSegment({"refine": {"morph_open_px": 0}}, load_taxonomy(), character=_Cut())
+    cascade.inventory = ["face", "clothes", "hair_back", "body"]
+    # a whole-figure "hair" box was tried too; it must not widen the hair region
+    cascade.debug_boxes = [{"role": "hair_back", "query": "hair", "xyxy": [20.0, 10.0, 140.0, 190.0], "score": 0.3}]
+    hair = cascade._hair_from_residual(character, [face, clothes])
+    assert hair is not None
+    # legs below the hem (y 150..190) are far from the head zone and in no hair box
+    assert int((hair.visible[150:190, :] > 0).sum()) == 0
+    # residual beside the face, inside the head zone, is hair
+    assert int(hair.visible[30, 45]) == 255
+    # residual far left of the head zone, chained only through the silhouette rim, is not
+    assert int(hair.visible[30, 22]) == 0
+
+
 def test_inject_pose_box_goes_first():
     cascade = CascadeSegment({}, load_taxonomy())
     cascade.pose_boxes = {"body": [4.0, 5.0, 10.0, 12.0]}

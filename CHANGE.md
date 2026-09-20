@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-19 — 清已知缺陷：眼睛、640 头发、手机、发梢、NITs
+
+- 做了：（1）眼睛 `min_box_cover` 0.5→0.4：DINO 眼框含眉/眼皮，低垂的眼 SAM mask 只盖 0.45–0.49，看过 mask 是完整的眼。（2）`hair_back.exclude_roles` 加 `clothes`：SAM 在衣服上有负点、overlap 校验生效，458 的头发不再把外套一起吐出来。（3）`_hair_from_residual`：tagger 说有头发但 SAM 切不出时，用角色残差里「贴着脸（脸高×`hair_reach` 0.6）或落在 DINO 头发框内」的块当 `hair_back`；候选先裁到该区域，且丢掉覆盖角色 >55% 的框，免得手杖/下摆沿着轮廓细缝连进来。（4）taxonomy 新增 `tag_queries`：acc 只在 WDTagger 看到 phone/staff 时才加 smartphone/staff query；acc 的通用 query 也只在饰品 tag 触发时跑（否则 296 肩膀被当 ribbon）。acc 的 `box_cover` 按 框∩角色 算（`box_cover_in_character`，只对 acc；对 face 开会把脖子吃进脸）。（5）peer_and 之后沿边回收 isnet 灰区（P≤0.85、12px 内、且和主体连通）的发梢；AND 结果先清 <200px 碎点。（6）两旁路彼此一致且 isnet 差得远（Dice 缺口 >0.05）时不再换 seed 重试，qa.json 记 `skipped_retries`。（7）peer_and 结构回退时保留 Dice 原因（`dice_reasons`）。（8）内部熵阈值 0.05→0.08：640 卡在 0.0499/0.0500 两次跑结果不同。（9）skill 文档改 v2（`.cursor/` 不进 git）；删了 `runs/flat/7d9f70f9`。途中抓到一个自己引入的 bug：回收发梢带来孤岛让 peer_and 结构校验失败、替换被放弃，908 的 body 吞了整张床——已修（只回收连通像素，失败退回未回收 mask）。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（114 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/`。`missing`：296 `[]`（原 `[eye_l, eye_r]`），4034 `[]`（原 `[eye_r]`），640 `[hair_front]`（原 `[hair_back, hair_front]`），其余 `[]`。296 `90_acc` = 手机（10294px，peer 只留了角色 mask 内的部分）。640 `10_hair_back` 85689px 只含头发。458 hair_back 201k→95k、clothes 76k→205k（外套回到衣服层）。908 一次 isnet 就走旁路，peer_and 回收 5846px 发梢，body 384k。6 张 diff 全黑、occluded 不压低层、hole ≤63px
+- 未做 / 已知缺陷：640 `hair_front` 仍缺（刘海在 face 层里）；手杖仍在 body（DINO staff 框太大，acc 被 too_large 拒）。296 手机只有角色 mask 内的一半成 acc，body 下面仍有手机像素（v0 闭集没有道具角色）。908 `arm_l` 仍切不出（box_cover 0.26）。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-19 — 修 Reviewer BLOCKER：occluded 不压低层可见区；角色 mask 不留洞
 
 - 做了：（1）`taxonomy.yaml` 里 `clothes.occluded_by` 去掉 `arm_l/arm_r`（arm order 25/26 在 clothes 40 之下）；`load_taxonomy` 校验 occluder 的 order 必须高于被遮挡层，否则报错；`plan_occlusion` 只认更高 order 的 occluder，且 hole 永不落在任何更低 order 层的 visible 上，pipeline 对结果再断言一次（`occluded_over_lower_visible == 0`）。（2）refine 末尾加 `fill_unclaimed_domain`：角色 mask 内没被非 overlay 层认领的像素——薄缝（离已有层 ≤ `seam_fill_px`）归最近层，成块的进 body（没 body 层就新建）；`logs/run.jsonl` 多一条 `coverage`，填之前的洞落 `steps/05_refine/unclaimed.png`。新增 `tests/test_taxonomy.py`、occlusion/refine 契约测试，102 passed。**没改 schema、没改 .venv、只修 BLOCKERS**

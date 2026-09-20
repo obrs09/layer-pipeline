@@ -33,6 +33,25 @@ class RoleSpec:
     max_out_of_box: float = 0.5
     max_overlap_frac: float = 0.45
     crumb_frac: float = 0.02
+    # box_cover against box ∩ character instead of the whole box (props that hang past the silhouette).
+    cover_in_character: bool = False
+    # ((gating tags), (extra detector queries)) pairs; queries only run when a tag fired.
+    tag_queries: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
+
+    def gate_tags(self) -> tuple[str, ...]:
+        """Tags that put this role in the inventory."""
+        base = self.required_if_tags or self.tag_names
+        extra = tuple(tag for tags, _queries in self.tag_queries for tag in tags)
+        return tuple(dict.fromkeys(base + extra))
+
+    def fired_queries(self, tags: dict[str, float], threshold: float) -> list[str]:
+        """Detector queries whose gating tag scored at or above threshold."""
+        scores = {_norm_tag(name): float(score) for name, score in tags.items()}
+        out: list[str] = []
+        for gate, queries in self.tag_queries:
+            if any(scores.get(tag, 0.0) >= threshold for tag in gate):
+                out.extend(q for q in queries if q not in out)
+        return out
 
 
 @dataclass
@@ -81,6 +100,16 @@ class Taxonomy:
             if role in pair:
                 return family
         return None
+
+
+def _parse_tag_queries(raw) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    out: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+    for item in raw or ():
+        tags = tuple(_norm_tag(t) for t in (item.get("tags") or ()))
+        queries = tuple(str(q) for q in (item.get("queries") or ()))
+        if tags and queries:
+            out.append((tags, queries))
+    return tuple(out)
 
 
 def _check_occluders_sit_above(roles: dict[str, RoleSpec]) -> None:
@@ -135,6 +164,8 @@ def load_taxonomy(path: str | Path | None = None) -> Taxonomy:
             max_out_of_box=float(usable.get("max_out_of_box", spec.get("max_out_of_box", 0.5))),
             max_overlap_frac=float(usable.get("max_overlap_frac", spec.get("max_overlap_frac", 0.45))),
             crumb_frac=float(usable.get("crumb_frac", spec.get("crumb_frac", 0.02))),
+            cover_in_character=bool(usable.get("box_cover_in_character", False)),
+            tag_queries=_parse_tag_queries(spec.get("tag_queries")),
         )
         roles[name] = role
         alias_to_role[_norm(name)] = name

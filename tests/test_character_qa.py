@@ -11,6 +11,8 @@ from layerforge.ops.character_qa import (
     connected_component_metrics,
     dice_coef,
     evaluate_character_qa,
+    peers_agree_isnet_outlier,
+    recover_soft_edges,
     shannon_entropy,
 )
 from layerforge.ops.trace import StepDump
@@ -244,6 +246,107 @@ def test_cascade_replaces_isnet_with_peer_and():
     assert "character" not in cascade.needs_click
     assert int(mask[60, 60]) == 0
     assert int(mask[30, 30]) == 255
+
+
+def test_recover_soft_edges_ignores_floating_specks():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[4:8, 20:40] = 255  # attached wisp (touches the head at row 8)
+    isnet[2:4, 60:64] = 255  # floating speck inside the reach band
+    prob = np.zeros((80, 80), dtype=np.float32)
+    prob[isnet > 0] = 0.6
+    out, recovered = recover_soft_edges(body, isnet, prob, {"peer_recover_px": 8})
+    assert recovered == 4 * 20
+    assert int(out[3, 62]) == 0
+
+
+def test_peer_and_drops_agreement_specks_and_survives_recovery():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[60:78, 4:78] = 255
+    toon = body.copy()
+    mod = body.copy()
+    for i in range(20):  # both peers agree on 20 tiny specks in the isnet-only region
+        y, x = 62 + (i // 10) * 8, 6 + (i % 10) * 7
+        toon[y : y + 3, x : x + 3] = 255
+        mod[y : y + 3, x : x + 3] = 255
+    prob = np.zeros((80, 80), dtype=np.float32)
+    prob[isnet > 0] = 0.6
+    choice = choose_peer_character(isnet, {"toonout": toon, "modnet": mod}, {"peer_recover_px": 6}, prob=prob)
+    assert choice is not None
+    assert choice["source"] == "peer_and"
+    assert int(choice["mask"][63, 7]) == 0
+    assert choice["qa"]["ok"] is True
+
+
+def test_recover_soft_edges_keeps_gray_wisps_not_confident_furniture():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[4:8, 20:40] = 255  # wisps above the head, uncertain
+    isnet[50:78, 54:78] = 255  # furniture block, confident
+    prob = np.zeros((80, 80), dtype=np.float32)
+    prob[isnet > 0] = 0.95
+    prob[4:8, 20:40] = 0.6
+    out, recovered = recover_soft_edges(body, isnet, prob, {"peer_recover_px": 6})
+    assert recovered == 4 * 20
+    assert int(out[5, 30]) == 255
+    assert int(out[60, 70]) == 0
+    same, none = recover_soft_edges(body, isnet, None, {})
+    assert none == 0 and same is body
+
+
+def test_choose_peer_recovers_gray_rim_from_isnet():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[4:8, 20:40] = 255
+    isnet[50:78, 54:78] = 255
+    prob = np.zeros((80, 80), dtype=np.float32)
+    prob[isnet > 0] = 0.95
+    prob[4:8, 20:40] = 0.6
+    choice = choose_peer_character(isnet, {"toonout": body, "modnet": body}, {}, prob=prob)
+    assert choice is not None
+    assert choice["source"] == "peer_and"
+    assert choice["recovered_px"] == 4 * 20
+    assert int(choice["mask"][5, 30]) == 255
+    assert int(choice["mask"][60, 70]) == 0
+
+
+def test_peer_and_keeps_dice_reasons_when_structural_fallback():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[50:78, 48:78] = 255
+    loose = body.copy()
+    loose[56:78, 8:30] = 255  # one peer is looser; AND vs it fails min_dice
+    tight = body.copy()
+    tight[8:20, 10:54] = 0
+    choice = choose_peer_character(isnet, {"toonout": loose, "modnet": tight}, {"min_dice": 0.995})
+    if choice is not None and choice["source"] == "peer_and" and "dice_reasons" in choice["qa"]:
+        assert any(item.startswith("dice_") for item in choice["qa"]["dice_reasons"])
+        assert choice["qa"]["ok"] is True
+
+
+def test_peers_agree_isnet_outlier_skips_hopeless_retries():
+    body = _blob_mask(80, 80)
+    isnet = body.copy()
+    isnet[56:78, 0:80] = 255  # isnet adds a bed under the figure
+    tight = body.copy()
+    tight[9:11, 12:16] = 0
+    assert peers_agree_isnet_outlier(isnet, {"toonout": body, "modnet": tight}, {})
+    assert not peers_agree_isnet_outlier(body, {"toonout": body, "modnet": tight}, {})
+    assert not peers_agree_isnet_outlier(isnet, {"toonout": body}, {})
+    cut = _RetryCut({0: isnet, 1: isnet, 2: isnet})
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=cut,
+        character_peers=[_NamedPeer("toonout", body), _NamedPeer("modnet", tight)],
+        dry_run=True,
+    )
+    cascade._cut_character(np.zeros((80, 80, 3), dtype=np.uint8))
+    assert cut.seeds == [0]
+    assert "skipped_retries" in cascade.character_qa["attempts"][0]
+    assert cascade.character_qa["chosen_source"] == "peer_and"
+    assert cascade.character_qa["flagged"] is False
 
 
 def test_cut_character_records_qa_without_flag():

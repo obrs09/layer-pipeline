@@ -38,6 +38,34 @@ def test_eye_overlap_face_too_much_fails():
     assert any("overlap_face" in r for r in result.reasons)
 
 
+def test_box_cover_counts_only_the_box_inside_the_character():
+    """A held phone box hangs over the table; the mask can only fill the character part."""
+    spec = _spec("acc")
+    character = np.zeros((100, 100), dtype=np.uint8)
+    character[:, 50:] = 255
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[40:60, 50:70] = 255  # fills the in-character half of the box
+    box = [30.0, 40.0, 70.0, 60.0]
+    result = usable(mask, spec, character, [], box)
+    assert not any(r.startswith("box_cover") for r in result.reasons)
+    thin = np.zeros((100, 100), dtype=np.uint8)
+    thin[40:60, 50:54] = 255
+    result = usable(thin, spec, character, [], box)
+    assert any(r.startswith("box_cover") for r in result.reasons)
+
+
+def test_face_box_cover_still_uses_the_whole_box():
+    """Body parts sit inside the silhouette; a loose face box must not pass on the normalized cover."""
+    spec = _spec("face")
+    assert not spec.cover_in_character
+    character = np.zeros((100, 100), dtype=np.uint8)
+    character[:, 50:] = 255
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[40:60, 50:60] = 255  # 25% of the box, 50% of the in-character half
+    result = usable(mask, spec, character, [], [30.0, 40.0, 70.0, 60.0])
+    assert any(r.startswith("box_cover") for r in result.reasons)
+
+
 def test_hair_drops_crumbs_keeps_main():
     spec = _spec("hair_back")
     character = np.ones((64, 64), dtype=np.uint8) * 255

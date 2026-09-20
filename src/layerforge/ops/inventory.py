@@ -20,7 +20,7 @@ def build_inventory(
         if spec.required:
             wanted.append(name)
             continue
-        gate = spec.required_if_tags or spec.tag_names
+        gate = spec.gate_tags()
         if gate and any(scores.get(tag, 0.0) >= thresh for tag in gate):
             wanted.append(name)
     return wanted

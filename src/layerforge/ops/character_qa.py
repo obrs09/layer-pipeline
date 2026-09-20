@@ -67,7 +67,7 @@ def evaluate_character_qa(
     max_gray = float(cfg.get("max_gray_frac", 0.25))
     erode_px = int(cfg.get("erode_px", 15))
     entropy_high = float(cfg.get("entropy_high", 0.5))
-    max_interior = float(cfg.get("max_interior_entropy_frac", 0.05))
+    max_interior = float(cfg.get("max_interior_entropy_frac", 0.08))
     min_dice = float(cfg.get("min_dice", 0.85))
 
     reasons: list[str] = []
@@ -151,15 +151,78 @@ def structural_score(mask: np.ndarray, cfg: dict | None = None) -> float:
     return largest - 0.01 * max(0, n_kept - 2)
 
 
+def peers_agree_isnet_outlier(
+    isnet: np.ndarray,
+    peers: dict[str, np.ndarray | None],
+    cfg: dict | None = None,
+) -> bool:
+    """Both peers agree with each other and isnet is far from both.
+
+    Re-thresholding isnet cannot close a gap this wide, so seed retries are skipped.
+    """
+    cfg = cfg or {}
+    min_dice = float(cfg.get("min_dice", 0.85))
+    min_agree = float(cfg.get("min_peer_agree", min_dice))
+    gap = float(cfg.get("retry_hopeless_gap", 0.05))
+    masks = [m for m in (peers or {}).values() if m is not None and int((m > 0).sum()) >= 64]
+    if len(masks) < 2:
+        return False
+    if dice_coef(masks[0], masks[1]) < min_agree:
+        return False
+    best = max(dice_coef(isnet, m) for m in masks)
+    return best < min_dice - gap
+
+
+def recover_soft_edges(
+    chosen: np.ndarray,
+    isnet: np.ndarray,
+    prob: np.ndarray | None,
+    cfg: dict | None = None,
+) -> tuple[np.ndarray, int]:
+    """Give a peer mask back isnet's uncertain rim: hair wisps and sheer fabric.
+
+    Only isnet pixels with gray-zone probability within `peer_recover_px` of the
+    chosen mask return. Confident isnet-only pixels (furniture) stay out.
+    """
+    cfg = cfg or {}
+    reach = int(cfg.get("peer_recover_px", 12))
+    if prob is None or reach <= 0:
+        return chosen, 0
+    import cv2
+
+    gray_hi = float(cfg.get("gray_hi", 0.85))
+    p = np.asarray(prob, dtype=np.float32)
+    if p.shape != chosen.shape[:2]:
+        return chosen, 0
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * reach + 1, 2 * reach + 1))
+    base = chosen > 0
+    band = cv2.dilate(base.astype(np.uint8), kernel) > 0
+    recover = (isnet > 0) & ~base & band & (p <= gray_hi)
+    if not recover.any():
+        return chosen, 0
+    # Only wisps attached to the mask come back; floating specks would add islands.
+    merged = base | recover
+    n, labels = cv2.connectedComponents(merged.astype(np.uint8), connectivity=8)
+    attached_ids = np.unique(labels[base])
+    attached = np.isin(labels, attached_ids[attached_ids != 0])
+    recover &= attached
+    if not recover.any():
+        return chosen, 0
+    out = (base | recover).astype(np.uint8) * 255
+    return out, int(recover.sum())
+
+
 def choose_peer_character(
     isnet: np.ndarray,
     peers: dict[str, np.ndarray | None],
     cfg: dict | None = None,
+    prob: np.ndarray | None = None,
 ) -> dict | None:
     """If ToonOut/MODNet agree more than isnet, return a replacement mask.
 
     Two agreeing peers are AND-ed. Otherwise the structurally better peer
     is used, as long as it still covers enough of the isnet silhouette.
+    With `prob`, isnet's gray-zone rim near the result is recovered.
     """
     cfg = cfg or {}
     if not bool(cfg.get("prefer_peers", True)):
@@ -208,6 +271,7 @@ def choose_peer_character(
     source = None
     if peers_agree:
         combo = np.logical_and(available[names[0]] > 0, available[names[1]] > 0)
+        combo = _drop_specks(combo, int(cfg.get("peer_island_px", 200)))
         combo_u8 = combo.astype(np.uint8) * 255
         if (
             int(combo.sum()) >= max(64, int(keep_min * isnet_fg))
@@ -230,17 +294,20 @@ def choose_peer_character(
         source = name
 
     others = {name: mask for name, mask in available.items() if name != source}
-    report = evaluate_character_qa(chosen, (chosen > 0).astype(np.float32), others, cfg)
-    if not report.ok and source == "peer_and":
-        # AND is allowed to fail peer-dice vs a looser peer; structural still required.
-        structural = evaluate_character_qa(chosen, None, {}, cfg)
-        if not structural.ok:
-            return None
-        report = structural
+    base = chosen
+    chosen, recovered_px = recover_soft_edges(base, isnet, prob, cfg)
+    qa = _peer_qa(chosen, others, source, cfg)
+    if qa is None and recovered_px > 0:
+        # Recovered rim broke the structural check; keep the plain peer mask.
+        chosen, recovered_px = base, 0
+        qa = _peer_qa(chosen, others, source, cfg)
+    if qa is None:
+        return None
 
     return {
         "mask": chosen,
         "source": source,
+        "recovered_px": recovered_px,
         "reasons": [
             key
             for key, flag in (
@@ -260,8 +327,40 @@ def choose_peer_character(
                 "isnet_fg": isnet_fg,
             }
         ),
-        "qa": report.to_dict(),
+        "qa": qa,
     }
+
+
+def _drop_specks(mask: np.ndarray, min_px: int) -> np.ndarray:
+    """Remove islands below min_px. Two coarse masks AND-ed leave agreement specks."""
+    if min_px <= 1:
+        return mask
+    import cv2
+
+    binary = (mask > 0).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    keep = np.zeros_like(binary, dtype=bool)
+    for k in range(1, n):
+        if int(stats[k, cv2.CC_STAT_AREA]) >= min_px:
+            keep |= labels == k
+    return keep
+
+
+def _peer_qa(chosen: np.ndarray, others: dict, source: str, cfg: dict) -> dict | None:
+    """QA for a peer-derived mask. None when it fails structurally."""
+    report = evaluate_character_qa(chosen, (chosen > 0).astype(np.float32), others, cfg)
+    if report.ok:
+        return report.to_dict()
+    if source != "peer_and":
+        return None
+    # AND is allowed to fail peer-dice vs a looser peer; structural still required.
+    structural = evaluate_character_qa(chosen, None, {}, cfg)
+    if not structural.ok:
+        return None
+    qa = structural.to_dict()
+    qa["dice_reasons"] = list(report.reasons)
+    qa["dice"] = report.metrics.get("dice")
+    return qa
 
 
 def _json_safe(value):

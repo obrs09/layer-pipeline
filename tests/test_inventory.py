@@ -46,3 +46,15 @@ def test_ribbon_only_when_confident():
     high = build_inventory({"1girl": 0.9, "ribbon": 0.7}, tax)
     assert "acc" not in low
     assert "acc" in high
+
+
+def test_phone_tag_puts_acc_in_inventory_and_fires_query():
+    tax = load_taxonomy()
+    tags = {"1girl": 0.99, "phone": 0.96, "holding_phone": 0.88}
+    assert "acc" in build_inventory(tags, tax)
+    spec = tax.spec("acc")
+    fired = spec.fired_queries(tags, spec.tag_threshold)
+    assert "smartphone" in fired
+    assert "staff" not in fired
+    assert spec.fired_queries({"1girl": 0.99}, spec.tag_threshold) == []
+    assert "smartphone" not in spec.queries

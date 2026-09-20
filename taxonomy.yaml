@@ -28,7 +28,8 @@ roles:
     skip_if_tags: [bald]
     tag_names: [long_hair, ponytail, twintails, white_hair]
     queries: ["hair", "anime hair", "long hair", "back hair"]
-    exclude_roles: [face, hair_front]
+    # clothes is cut first; a negative point on it stops SAM returning the whole figure.
+    exclude_roles: [face, hair_front, clothes]
     aliases: [hair-back, long-hair-back]
     usable:
       min_area_frac: 0.02
@@ -207,7 +208,8 @@ roles:
       min_area_frac: 0.0006
       max_area_frac: 0.06
       max_components: 1
-      min_box_cover: 0.5
+      # DINO eye boxes include brow/lid; a downcast eye fills under half of it.
+      min_box_cover: 0.4
       max_out_of_box: 0.35
       max_overlap_frac: 0.22
 
@@ -226,7 +228,7 @@ roles:
       min_area_frac: 0.0006
       max_area_frac: 0.06
       max_components: 1
-      min_box_cover: 0.5
+      min_box_cover: 0.4
       max_out_of_box: 0.35
       max_overlap_frac: 0.22
 
@@ -292,6 +294,13 @@ roles:
       - hair_bow
     tag_threshold: 0.5
     queries: ["hair ribbon", "earring", "hair ornament", "necklace"]
+    # Held props only get a DINO query when WDTagger saw them. They stay overlay sprites;
+    # body underneath keeps the pixels (closed v0 role set has no prop role).
+    tag_queries:
+      - tags: [phone, cellphone, smartphone, holding_phone]
+        queries: ["smartphone", "cellphone"]
+      - tags: [staff, holding_staff, wand, holding_wand]
+        queries: ["staff", "wand"]
     exclude_roles: []
     aliases:
       - accessory
@@ -313,6 +322,8 @@ roles:
       max_area_frac: 0.12
       max_components: 3
       min_box_cover: 0.4
+      # a held phone's box hangs over the table; judge cover on the box inside the character
+      box_cover_in_character: true
       max_out_of_box: 0.5
       max_overlap_frac: 0.8
 

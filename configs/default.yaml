@@ -19,6 +19,7 @@ cascade:
   dino_threshold: 0.25
   tag_threshold: 0.35
   character_size: 1024
+  hair_reach: 0.6
 
 character_qa:
   max_attempts: 3
@@ -30,7 +31,8 @@ character_qa:
   max_gray_frac: 0.25
   erode_px: 15
   entropy_high: 0.5
-  max_interior_entropy_frac: 0.05
+  # 0.05 sat on the fence for 64010c19 (0.0499 vs 0.0500 between runs); furniture cases score 0.07–0.08 but fail on Dice.
+  max_interior_entropy_frac: 0.08
   min_dice: 0.85
   prefer_peers: true
   min_peer_agree: 0.85
@@ -38,6 +40,9 @@ character_qa:
   overinclude_contain: 0.90
   overinclude_extra: 0.10
   min_keep_of_isnet: 0.50
+  peer_recover_px: 12
+  peer_island_px: 200
+  retry_hopeless_gap: 0.05
   peers:
     - toonout
     - modnet
