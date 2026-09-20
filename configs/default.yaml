@@ -29,6 +29,11 @@ cascade:
     roles: [face]
     pad_frac: 0.18
     min_side: 1024
+  # Hair SAM hints: peek a face box first, seed on hair, never the face center.
+  hair_hint:
+    enabled: true
+    face_dilate_px: 8
+    drop_skin: true
   # Whole hair stays on hair_back. hair_front is a copy of hair ∩ dilated face.
   hair_split:
     enabled: true

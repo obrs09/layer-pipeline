@@ -72,6 +72,8 @@ def usable(
     for other in others:
         if other.role not in spec.exclude_roles:
             continue
+        if other.source == "placeholder":
+            continue
         other_vis = other.visible > 0
         other_area = int(other_vis.sum())
         if other_area == 0:
@@ -89,11 +91,17 @@ def usable(
             box_mask = np.zeros_like(vis)
             box_mask[y0:y1, x0:x1] = True
             box_area = max(1, int(box_mask.sum()))
-            if spec.cover_in_character:
-                # Held props hang past the silhouette; only the box inside the character can be covered.
-                coverable = int((box_mask & char).sum())
-                if coverable >= 16:
-                    box_area = coverable
+            coverable = box_mask.copy()
+            if spec.cover_in_character or spec.cover_minus_exclude:
+                coverable &= char
+            if spec.cover_minus_exclude:
+                for other in others:
+                    if other.role not in spec.exclude_roles:
+                        continue
+                    coverable &= other.visible == 0
+            leftover = int(coverable.sum())
+            if leftover >= 16 and (spec.cover_in_character or spec.cover_minus_exclude):
+                box_area = leftover
             cover = int((vis & box_mask).sum()) / box_area
             out_frac = 1.0 - (int((vis & box_mask).sum()) / max(1, area))
             if cover < spec.min_box_cover:

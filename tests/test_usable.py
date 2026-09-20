@@ -66,6 +66,51 @@ def test_face_box_cover_still_uses_the_whole_box():
     assert any(r.startswith("box_cover") for r in result.reasons)
 
 
+def test_placeholder_face_does_not_fail_hair_overlap():
+    spec = _spec("hair_back")
+    character = np.ones((40, 40), dtype=np.uint8) * 255
+    hair = np.zeros((40, 40), dtype=np.uint8)
+    hair[2:18, 8:32] = 255
+    face = LayerMask(
+        role="face",
+        label="face",
+        visible=np.zeros((40, 40), dtype=np.uint8),
+        source="placeholder",
+    )
+    face.visible[8:28, 10:30] = 255
+    result = usable(hair, spec, character, [face], [6.0, 2.0, 34.0, 20.0])
+    assert not any("overlap_face" in r for r in result.reasons)
+
+
+def test_hair_box_cover_uses_box_minus_face_and_clothes():
+    spec = _spec("hair_back")
+    assert spec.cover_minus_exclude
+    character = np.ones((80, 80), dtype=np.uint8) * 255
+    clothes = LayerMask(
+        role="clothes",
+        label="clothes",
+        visible=np.zeros((80, 80), dtype=np.uint8),
+        source="sam",
+    )
+    clothes.visible[40:80, :] = 255
+    face = LayerMask(
+        role="face",
+        label="face",
+        visible=np.zeros((80, 80), dtype=np.uint8),
+        source="placeholder",
+    )
+    face.visible[8:32, 20:60] = 255
+    hair = np.zeros((80, 80), dtype=np.uint8)
+    hair[0:8, :] = 255
+    hair[8:20, 0:20] = 255
+    hair[8:20, 60:80] = 255
+    box = [0.0, 0.0, 80.0, 80.0]
+    result = usable(hair, spec, character, [clothes, face], box)
+    assert not any(r.startswith("box_cover") for r in result.reasons)
+    without = usable(hair, spec, character, [], box)
+    assert any(r.startswith("box_cover") for r in without.reasons)
+
+
 def test_hair_drops_crumbs_keeps_main():
     spec = _spec("hair_back")
     character = np.ones((64, 64), dtype=np.uint8) * 255

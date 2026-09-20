@@ -11,6 +11,7 @@ from layerforge.ops.character_qa import (
     peers_agree_isnet_outlier,
 )
 from layerforge.ops.face_split import split_face_colors
+from layerforge.ops.hair_hint import fill_box, hair_positive
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.trace import masked_rgba
@@ -75,6 +76,7 @@ class CascadeSegment:
         self.character_qa = None
         self.pose_person = None
         self.pose_boxes: dict[str, list[float]] = {}
+        self.peek_boxes: dict[str, list[float]] = {}
         self.pose_points: dict[str, list[tuple[float, float]]] = {}
         self._last_isnet_mask = None
         self._last_peer_masks = {}
@@ -94,6 +96,7 @@ class CascadeSegment:
         self.character_qa = None
         self.pose_person = None
         self.pose_boxes = {}
+        self.peek_boxes = {}
         self.pose_points = {}
         self._last_isnet_mask = None
         self._last_peer_masks = {}
@@ -426,15 +429,15 @@ class CascadeSegment:
             else:
                 ranked = []
                 last_reasons.append(f"no_box:{query}")
-            ranked = self._inject_pose_box(role, ranked)
+            ranked = self._inject_peek_box(role, self._inject_pose_box(role, ranked))
             if not ranked:
                 continue
+            others_for_cut = self._others_for_cut(image, character, role, others)
             for box in ranked[:2]:
                 self._trace_box(role, query, box, detections)
-                pos = [_box_center(box)]
-                pos.extend(self.pose_points.get(role) or [])
+                pos = self._positive_points(image, character, role, box, others_for_cut)
                 avoid = box if role == "face" else None
-                neg = _neighbor_negatives(others, spec.exclude_roles, avoid_box=avoid)
+                neg = _neighbor_negatives(others_for_cut, spec.exclude_roles, avoid_box=avoid)
                 mask, sam_score = self._sam_predict(role, box, pos, neg)
                 if mask is None:
                     last_reasons.append(f"sam2_empty:{query}")
@@ -442,7 +445,7 @@ class CascadeSegment:
                 mask = _constrain_mask(mask, character, box)
                 if not spec.overlay:
                     mask = morph_open(mask, self.morph_open_px)
-                result = usable(mask, spec, character, others, box)
+                result = usable(mask, spec, character, others_for_cut, box)
                 last_reasons = list(result.reasons)
                 if result.ok:
                     return _layer(
@@ -795,6 +798,80 @@ class CascadeSegment:
         key = tuple(round(float(v), 1) for v in box)
         rest = [item for item in ranked if tuple(round(float(v), 1) for v in item) != key]
         return [[float(v) for v in box], *rest]
+
+    def _inject_peek_box(self, role: str, ranked: list[list[float]]) -> list[list[float]]:
+        box = self.peek_boxes.get(role)
+        if not box:
+            return ranked
+        key = tuple(round(float(v), 1) for v in box)
+        rest = [item for item in ranked if tuple(round(float(v), 1) for v in item) != key]
+        return [[float(v) for v in box], *rest]
+
+    def _others_for_cut(
+        self,
+        image: np.ndarray,
+        character: np.ndarray,
+        role: str,
+        others: list[LayerMask],
+    ) -> list[LayerMask]:
+        if role != "hair_back":
+            return others
+        if any(layer.role == "face" and layer.source != "placeholder" for layer in others):
+            return others
+        placeholder = self._ensure_face_placeholder(image, character)
+        if placeholder is None:
+            return others
+        return [*others, placeholder]
+
+    def _ensure_face_placeholder(self, image: np.ndarray, character: np.ndarray) -> LayerMask | None:
+        hint_cfg = (self.cfg.get("cascade") or {}).get("hair_hint") or {}
+        if not bool(hint_cfg.get("enabled", True)):
+            return None
+        box = self.peek_boxes.get("face")
+        if box is None and self.boxes is not None:
+            spec = self.taxonomy.spec("face")
+            detections: list = []
+            for query in spec.queries:
+                detections.extend(self.boxes.detect(image, [query], self.dino_threshold) or [])
+            ranked = _rank_boxes(detections, character, spec)
+            if ranked:
+                box = ranked[0]
+                self.peek_boxes["face"] = box
+        if box is None:
+            return None
+        return LayerMask(
+            role="face",
+            label="face",
+            visible=fill_box(character.shape, box),
+            source="placeholder",
+            notes="dino face box; exclude only",
+        )
+
+    def _positive_points(
+        self,
+        image: np.ndarray,
+        character: np.ndarray,
+        role: str,
+        box: list[float],
+        others: list[LayerMask],
+    ) -> list[tuple[float, float]]:
+        pos: list[tuple[float, float]] = []
+        if role == "hair_back":
+            hint_cfg = (self.cfg.get("cascade") or {}).get("hair_hint") or {}
+            seed = hair_positive(
+                image,
+                character,
+                box,
+                others,
+                face_dilate_px=int(hint_cfg.get("face_dilate_px", 8)),
+                drop_skin=bool(hint_cfg.get("drop_skin", True)),
+            )
+            if seed is not None:
+                pos.append(seed)
+        if not pos:
+            pos.append(_box_center(box))
+        pos.extend(self.pose_points.get(role) or [])
+        return pos
 
     def _mark_missing(self, role: str) -> None:
         if role not in self.missing:

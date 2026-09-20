@@ -530,6 +530,50 @@ def test_whole_hair_dump_written():
     assert dump.jsons["04_segment/hair_whole.json"]["px"] == int((hair.visible > 0).sum())
 
 
+def test_face_placeholder_is_not_kept():
+    dino = _Dino(
+        {
+            "hair": [[4, 2, 44, 40]],
+            "anime face": [[12, 10, 36, 28]],
+            "face": [[12, 10, 36, 28]],
+            "anime clothes": [[8, 24, 40, 44]],
+        }
+    )
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        character=_Cut(),
+        tagger=_Tagger({"1girl": 0.99, "long_hair": 0.9}),
+        boxes=dino,
+        sam2=_Sam2(fill_box=True),
+    )
+    layers = cascade.segment(_image(), SegmentHints())
+    assert cascade.peek_boxes.get("face")
+    assert all(layer.source != "placeholder" for layer in layers)
+    assert all(layer.role != "face" or "placeholder" not in (layer.notes or "") for layer in layers)
+
+
+def test_hair_positive_not_face_center():
+    from layerforge.ops.hair_hint import fill_box
+
+    character = np.ones((48, 48), dtype=np.uint8) * 255
+    face = LayerMask(
+        role="face",
+        label="face",
+        visible=fill_box((48, 48), [14.0, 16.0, 34.0, 32.0]),
+        source="placeholder",
+    )
+    clothes = LayerMask(role="clothes", label="clothes", visible=_mask(28, 8, 46, 40), source="sam")
+    cascade = CascadeSegment({}, load_taxonomy())
+    image = np.full((48, 48, 3), 70, dtype=np.uint8)
+    image[2:14, 8:40] = (40, 40, 170)
+    points = cascade._positive_points(image, character, "hair_back", [8.0, 2.0, 40.0, 40.0], [clothes, face])
+    assert points
+    x, y = points[0]
+    assert y < 16.0
+    assert not (14.0 <= x <= 34.0 and 16.0 <= y <= 32.0)
+
+
 def test_whole_hair_cut_does_not_query_back_hair():
     dino = _Dino(
         {

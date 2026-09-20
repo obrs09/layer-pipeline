@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-20 — 头发正点离开脸；box_cover 用框减衣服减脸
+
+- 做了：切整发前 DINO peek 一张占位脸（`source=placeholder`），只给负点 / `exclude_roles` / box_cover 用，**不进 kept、不落盘**，真脸仍按原序 SAM。头发正点改成「头发框 ∩ 角色 − 膨胀脸框 − 已切衣服/身体」的质心，可选 Lab 丢掉暖肤（`cascade.hair_hint`）。overlap 检查忽略占位脸，避免刘海被矩形 `overlap_face` 否决。`hair_back.usable.box_cover_minus_exclude: true`：覆盖率分母是框里去掉衣服和脸之后的面积。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（147 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/01_hair_back.png`（908 是 `02_hair_back`）+ `hair_whole.json`。6 张整发都是 `source=sam query=hair`（296=0.978、4034=0.959、458=0.871、640=0.841、908=0.955、a163=0.941）。296 不再 residual/方块。4034/908/a163 整发里没有脸/眼。`missing`：6 张 `[]`
+- 未做 / 已知缺陷：458 整发仍带着齿轮和火焰。a163 角和蝴蝶结还在头发上。640 肩上白绒还沾着。4034 真脸 SAM score=0.090。几何前发仍只是整发∩膨胀脸。908 `arm_l` 仍切不出。没重开 face_split、没切脖子。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 整发只用 hair query，并单独落盘
 
 - 做了：整发仍走 SAM2 + Grounding DINO，但 `hair_back.queries` 改成 `hair` / `anime hair` / `long hair`，去掉 `back hair`。前发 query（bangs / front hair）仍不跑。切开当时把整发写成 `04_segment/hair_whole.png` + mask + json。包里角色名仍是 `hair_back`（order 10），**没改 schema、没改 .venv**

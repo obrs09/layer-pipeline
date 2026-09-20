@@ -39,6 +39,7 @@ roles:
       min_box_cover: 0.35
       max_out_of_box: 0.55
       max_overlap_frac: 0.55
+      box_cover_minus_exclude: true
 
   body:
     order: 20

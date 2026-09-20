@@ -35,6 +35,8 @@ class RoleSpec:
     crumb_frac: float = 0.02
     # box_cover against box ∩ character instead of the whole box (props that hang past the silhouette).
     cover_in_character: bool = False
+    # Hair boxes include face/clothes; cover is judged on the leftover area.
+    cover_minus_exclude: bool = False
     # ((gating tags), (extra detector queries)) pairs; queries only run when a tag fired.
     tag_queries: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
 
@@ -165,6 +167,7 @@ def load_taxonomy(path: str | Path | None = None) -> Taxonomy:
             max_overlap_frac=float(usable.get("max_overlap_frac", spec.get("max_overlap_frac", 0.45))),
             crumb_frac=float(usable.get("crumb_frac", spec.get("crumb_frac", 0.02))),
             cover_in_character=bool(usable.get("box_cover_in_character", False)),
+            cover_minus_exclude=bool(usable.get("box_cover_minus_exclude", False)),
             tag_queries=_parse_tag_queries(spec.get("tag_queries")),
         )
         roles[name] = role
