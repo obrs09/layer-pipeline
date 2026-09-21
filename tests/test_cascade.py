@@ -470,7 +470,7 @@ def test_hair_from_residual_leaves_far_blobs_for_body():
     assert int(hair.visible[30, 22]) == 0
 
 
-def test_hair_split_front_from_face_zone():
+def test_hair_split_front_is_hair_covering_face():
     h, w = 80, 60
     hair_vis = np.zeros((h, w), dtype=np.uint8)
     hair_vis[5:50, 10:50] = 255
@@ -481,7 +481,7 @@ def test_hair_split_front_from_face_zone():
             "cascade": {
                 "hair_split": {
                     "enabled": True,
-                    "face_dilate_px": 2,
+                    "face_dilate_px": 0,
                     "min_front_px": 16,
                 }
             }
@@ -498,12 +498,14 @@ def test_hair_split_front_from_face_zone():
     cascade._split_hair_front(kept)
     by_role = {layer.role: layer for layer in kept}
     assert "hair_front" in by_role
+    assert "covering face" in by_role["hair_front"].notes
     # copy only: whole hair is unchanged, including under the face
     assert np.array_equal(by_role["hair_back"].visible, before)
     assert int(by_role["hair_back"].visible[30, 30]) == 255
     assert int(by_role["hair_back"].visible[48, 30]) == 255
-    # front is hair ∩ dilated face, not a filled face box
+    # front is hair that covers the face, not a ring around a dilated face
     assert int(by_role["hair_front"].visible[30, 30]) == 255
+    assert int(by_role["hair_front"].visible[18, 30]) == 0
     assert int(by_role["hair_front"].visible[12, 30]) == 0
     assert int(by_role["hair_front"].visible[48, 30]) == 0
 

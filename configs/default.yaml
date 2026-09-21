@@ -34,10 +34,10 @@ cascade:
     enabled: true
     face_dilate_px: 8
     drop_skin: true
-  # Whole hair stays on hair_back. hair_front is a copy of hair ∩ dilated face.
+  # Whole hair stays on hair_back. hair_front is the part of that cut covering the face.
   hair_split:
     enabled: true
-    face_dilate_px: 8
+    face_dilate_px: 0
     min_front_px: 32
   # Off: Lab/grow/edge peel of hair from the SAM face did more harm than good.
   face_split:

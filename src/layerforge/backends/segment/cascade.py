@@ -898,7 +898,7 @@ class CascadeSegment:
         )
 
     def _split_hair_front(self, kept: list[LayerMask]) -> None:
-        """Copy bangs from whole hair. Never punch the face box or mask out of hair_back."""
+        """Copy the part of whole hair that covers the face. Never punch hair_back."""
         split_cfg = (self.cfg.get("cascade") or {}).get("hair_split") or {}
         if not bool(split_cfg.get("enabled", True)):
             return
@@ -907,14 +907,23 @@ class CascadeSegment:
         if any(layer.role == "hair_front" and int((layer.visible > 0).sum()) > 0 for layer in kept):
             return
         hair = next((layer for layer in kept if layer.role == "hair_back" and int((layer.visible > 0).sum()) > 0), None)
-        face = next((layer for layer in kept if layer.role == "face" and int((layer.visible > 0).sum()) > 0), None)
+        face = next(
+            (
+                layer
+                for layer in kept
+                if layer.role == "face" and layer.source != "placeholder" and int((layer.visible > 0).sum()) > 0
+            ),
+            None,
+        )
         if hair is None or face is None:
             return
-        dilate_px = int(split_cfg.get("face_dilate_px", 8))
+        dilate_px = int(split_cfg.get("face_dilate_px", 0))
         min_front = int(split_cfg.get("min_front_px", 32))
-        zone = dilate_mask(face.visible, dilate_px) > 0
+        face_vis = face.visible > 0
+        if dilate_px > 0:
+            face_vis = dilate_mask(face.visible, dilate_px) > 0
         hair_vis = hair.visible > 0
-        front = hair_vis & zone
+        front = hair_vis & face_vis
         if int(front.sum()) < min_front:
             return
         kept.append(
@@ -922,7 +931,7 @@ class CascadeSegment:
                 "hair_front",
                 front.astype(np.uint8) * 255,
                 hair.score,
-                "hair_split copy of whole hair ∩ dilated face",
+                "hair_split copy of whole hair covering face",
             )
         )
         for bucket in (self.missing, self.needs_click):
@@ -935,6 +944,8 @@ class CascadeSegment:
                     "applied": True,
                     "front_px": int(front.sum()),
                     "back_px": int(hair_vis.sum()),
+                    "cover_px": int(front.sum()),
+                    "dilate_px": dilate_px,
                     "peeled": False,
                 },
             )

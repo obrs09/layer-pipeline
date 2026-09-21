@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — 前发改成整发里盖住脸的部分
+
+- 做了：`hair_front` 不再用膨胀脸去套整发，改成 **整发 ∩ 真脸 mask**（`cascade.hair_split.face_dilate_px: 0`）。仍只复制、不打孔 `hair_back`，占位脸不参与拆分。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（147 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<uuid8>/steps/04_segment/03_hair_front.png`（908 是 `04_hair_front`）、`hair_split.json`。front_px：296=2152、4034=61141、458=13469、640=14773、908=21442、a163=1012（上一轮膨胀脸分别是 6399 / 74704 / 18977 / 19497 / 29619 / 5962）。296 / a163 不再是贴脸一圈。`missing`：6 张 `[]`
+- 未做 / 已知缺陷：908 / 4034 前发外沿仍是方的——真脸 SAM 仍是填满裁块的框（score 0.300 / 0.090），盖住这块「脸」的头发外接框等于脸框。已经写进 face 层的刘海不会出现在 hair_front。458 整发仍带齿轮火焰。640 肩绒还在。908 `arm_l` 仍切不出。没重开 face_split、没切脖子。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — 一次性脚本放到 tmp_scripts 并 gitignore
 
 - 做了：`_tmp_summarize_runs.py` 一类本地验收脚本改放到 `tmp_scripts/`，目录加入 `.gitignore`。切件逻辑没改。908 脸/前发方框只调查，没修。
