@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — mutex 让盖脸的头发留在 hair_front
+
+- 做了：上一轮前发定义成整发∩真脸之后，是 face 的真子集；`cut_priority` 仍是 face 80 > hair_front 70，refine mutex 把像素全给脸，前发被 `min_area` 丢掉，包里没有 `80_hair_front`（04 dump 还在）。现把 `hair_front.cut_priority` 改成 85（眼/嘴之下、脸之上），与 `face.occluded_by: [hair_front]` 一致。**没改 schema、没改 .venv、没改拆分几何**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（148 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：6 张都有 `layers/80_hair_front.png`、`masks/80_hair_front.png`、`steps/05_refine/80_hair_front.png`。`hair_split.json` front_px 仍是 296=2152、4034=61141、458=13469、640=14773、908=21442、a163=1012。`missing`：6 张 `[]`
+- 未做 / 已知缺陷：908 / 4034 / 458 / 640 前发外沿仍跟脸裁块框一样（脸 SAM 仍是填满框）。a163 前发只有 1012px 碎发。已经写进 face 层、但不在整发里的刘海仍不会进 hair_front。脸可见区会被抠掉盖住的头发。458 整发仍带齿轮火焰。640 肩绒还在。908 `arm_l` 仍切不出。没重开 face_split。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — 前发改成整发里盖住脸的部分
 
 - 做了：`hair_front` 不再用膨胀脸去套整发，改成 **整发 ∩ 真脸 mask**（`cascade.hair_split.face_dilate_px: 0`）。仍只复制、不打孔 `hair_back`，占位脸不参与拆分。**没改 schema、没改 .venv**

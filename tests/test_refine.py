@@ -116,6 +116,19 @@ def test_mutex_face_wins_over_hair_back():
     assert int((by_role["hair_back"].visible > 0).sum()) == 20 * 20 - 12 * 12
 
 
+def test_mutex_hair_front_keeps_pixels_covering_face():
+    """Front hair is a subset of the face; it must not be emptied by face claiming first."""
+    face = _mask("face", "face", 4, 4, h=16, w=16)
+    bangs = _mask("hair_front", "hair", 4, 4, h=8, w=16)
+    hair = _mask("hair_back", "hair", 4, 4, h=24, w=20)
+    out = refine_masks([hair, face, bangs], load_taxonomy())
+    by_role = {layer.role: layer for layer in out}
+    assert "hair_front" in by_role
+    assert int((by_role["hair_front"].visible > 0).sum()) == 8 * 16
+    assert int((by_role["face"].visible[4:12, 4:20] > 0).sum()) == 0
+    assert int((by_role["face"].visible > 0).sum()) == 16 * 16 - 8 * 16
+
+
 def _character(h: int = 96, w: int = 80) -> np.ndarray:
     domain = np.zeros((h, w), dtype=np.uint8)
     domain[4:92, 8:72] = 255
