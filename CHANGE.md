@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — 前/后发三条策略分开跑，包用遮挡逆向
+
+- 做了：整发切开后 **分别** 跑三条拆分，不混成一条。1) `occlusion`：额头/眉眼先验种子 + 衣服/下脸作屏障测地生长，`back = hair \\ front`，并 `peel_back`。2) `depth`：Depth Anything V2 Small 在脸深度平面切开，结果只落盘对比。3) `parsing`：接口已接，本机无二次元前后发权重则跳过。YAML：`cascade.hair_split.strategy` / `compare`。默认包用 occlusion。**没改 schema、没改 .venv**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（154 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`04_segment/hair_split.json`、`hair_split_occlusion.png`、`hair_split_depth.png`（parsing 无图）。包 `layers/80_hair_front.png` + 剥后的 `10_hair_back.png`。occlusion front_px：296=34263、4034=95528、458=30130、640=11119、908=61345、a163=63326。6 张 `missing=[]`，都有 `80_hair_front`
+- 未做 / 已知缺陷：parsing 跳过（`no local anime_parse weights`）。depth 几乎把整顶当前发（296 front 208k / 整发 216k），只作对比。occlusion 2D 连通仍会从刘海长到头顶（908/a163 前发偏大）。296 后发有刘海形的洞。458 齿轮火焰仍在整发里。640 肩绒还在。908 `arm_l` 仍切不出。脸 crop 方框没修。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — mutex 让盖脸的头发留在 hair_front
 
 - 做了：上一轮前发定义成整发∩真脸之后，是 face 的真子集；`cut_priority` 仍是 face 80 > hair_front 70，refine mutex 把像素全给脸，前发被 `min_area` 丢掉，包里没有 `80_hair_front`（04 dump 还在）。现把 `hair_front.cut_priority` 改成 85（眼/嘴之下、脸之上），与 `face.occluded_by: [hair_front]` 一致。**没改 schema、没改 .venv、没改拆分几何**

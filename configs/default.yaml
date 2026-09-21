@@ -34,11 +34,29 @@ cascade:
     enabled: true
     face_dilate_px: 8
     drop_skin: true
-  # Whole hair stays on hair_back. hair_front is the part of that cut covering the face.
+  # Front/back hair: occlusion inversion by default. depth/parsing run when compare is on.
   hair_split:
     enabled: true
-    face_dilate_px: 0
+    strategy: occlusion
+    compare: true
+    peel_back: true
     min_front_px: 32
+    occlusion:
+      forehead_frac: 0.42
+      bangs_up_frac: 0.35
+      grow_px: 48
+      barrier_dilate_px: 2
+    depth:
+      enabled: true
+      allow_hub: true
+      eps: 0.04
+      sam_refine: true
+    parsing:
+      enabled: true
+      erode_px: 8
+      pos_points: 6
+      neg_points: 4
+      sam_refine: true
   # Off: Lab/grow/edge peel of hair from the SAM face did more harm than good.
   face_split:
     enabled: false
@@ -113,6 +131,9 @@ paths:
   dino_dir: model/grounding_dino
   lama_dir: model/lama
   sd15_dir: model/sd15
+  depth_anything_dir: model/depth_anything
+  depth_anything_model: depth-anything/Depth-Anything-V2-Small-hf
+  anime_parse_dir: model/anime_parse
 
 export:
   psd: false

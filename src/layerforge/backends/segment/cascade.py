@@ -12,6 +12,7 @@ from layerforge.ops.character_qa import (
 )
 from layerforge.ops.face_split import split_face_colors
 from layerforge.ops.hair_hint import fill_box, hair_positive
+from layerforge.ops.hair_split import bangs_region, sample_points, split_depth, split_occlusion, split_parsing
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.trace import masked_rgba
@@ -78,6 +79,7 @@ class CascadeSegment:
         self.pose_boxes: dict[str, list[float]] = {}
         self.peek_boxes: dict[str, list[float]] = {}
         self.pose_points: dict[str, list[tuple[float, float]]] = {}
+        self.pose_keypoints: list[dict] = []
         self._last_isnet_mask = None
         self._last_peer_masks = {}
 
@@ -98,6 +100,7 @@ class CascadeSegment:
         self.pose_boxes = {}
         self.peek_boxes = {}
         self.pose_points = {}
+        self.pose_keypoints = []
         self._last_isnet_mask = None
         self._last_peer_masks = {}
         if hints.parts:
@@ -156,7 +159,7 @@ class CascadeSegment:
                 if role == "hair_back":
                     self._dump_hair_whole(image, layer)
                 if role == "face":
-                    self._split_hair_front(kept)
+                    self._split_hair_front(image, kept)
             elif spec.required or spec.required_if_tags:
                 self._mark_missing(role)
         hair = self._hair_from_residual(character, kept)
@@ -166,7 +169,7 @@ class CascadeSegment:
             for bucket in (self.missing, self.needs_click):
                 if "hair_back" in bucket:
                     bucket.remove("hair_back")
-        self._split_hair_front(kept)
+        self._split_hair_front(image, kept)
         if "hair_front" in inventory and not any(layer.role == "hair_front" for layer in kept):
             self._mark_missing("hair_front")
         if "body" in inventory:
@@ -257,7 +260,7 @@ class CascadeSegment:
         hair = next((layer for layer in kept if layer.role == "hair_back"), None)
         if hair is not None:
             self._dump_hair_whole(image, hair)
-        self._split_hair_front(kept)
+        self._split_hair_front(image, kept)
         kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
         self._dump_failures()
@@ -347,6 +350,7 @@ class CascadeSegment:
         self.pose_person = estimate.person_mask
         self.pose_boxes = dict(estimate.boxes or {})
         self.pose_points = dict(estimate.points or {})
+        self.pose_keypoints = list(estimate.keypoints or [])
 
     def _tag(self, image: np.ndarray) -> dict[str, float]:
         if self.tagger is None:
@@ -897,8 +901,8 @@ class CascadeSegment:
             },
         )
 
-    def _split_hair_front(self, kept: list[LayerMask]) -> None:
-        """Copy the part of whole hair that covers the face. Never punch hair_back."""
+    def _split_hair_front(self, image: np.ndarray, kept: list[LayerMask]) -> None:
+        """Split whole hair into front/back. Strategies run separately; one is kept."""
         split_cfg = (self.cfg.get("cascade") or {}).get("hair_split") or {}
         if not bool(split_cfg.get("enabled", True)):
             return
@@ -917,38 +921,166 @@ class CascadeSegment:
         )
         if hair is None or face is None:
             return
-        dilate_px = int(split_cfg.get("face_dilate_px", 0))
+        clothes = next((layer for layer in kept if layer.role == "clothes"), None)
+        body = next((layer for layer in kept if layer.role == "body"), None)
         min_front = int(split_cfg.get("min_front_px", 32))
-        face_vis = face.visible > 0
-        if dilate_px > 0:
-            face_vis = dilate_mask(face.visible, dilate_px) > 0
-        hair_vis = hair.visible > 0
-        front = hair_vis & face_vis
-        if int(front.sum()) < min_front:
-            return
-        kept.append(
-            _layer(
-                "hair_front",
-                front.astype(np.uint8) * 255,
-                hair.score,
-                "hair_split copy of whole hair covering face",
-            )
+        occ_cfg = split_cfg.get("occlusion") or {}
+        occlusion = split_occlusion(
+            hair.visible,
+            face.visible,
+            clothes=None if clothes is None else clothes.visible,
+            body=None if body is None else body.visible,
+            keypoints=self.pose_keypoints,
+            forehead_frac=float(occ_cfg.get("forehead_frac", 0.42)),
+            bangs_up_frac=float(occ_cfg.get("bangs_up_frac", 0.35)),
+            grow_px=int(occ_cfg.get("grow_px", 48)),
+            barrier_dilate_px=int(occ_cfg.get("barrier_dilate_px", 2)),
+            min_front_px=min_front,
         )
+        results = {"occlusion": occlusion}
+        skipped: dict[str, str] = {}
+        bangs = bangs_region(
+            face.visible,
+            self.pose_keypoints,
+            forehead_frac=float(occ_cfg.get("forehead_frac", 0.42)),
+            bangs_up_frac=float(occ_cfg.get("bangs_up_frac", 0.35)),
+        )
+        if bool(split_cfg.get("compare", False)) or str(split_cfg.get("strategy") or "occlusion") == "depth":
+            depth_result, depth_skip, depth_map = self._hair_split_depth(image, hair.visible, face.visible, bangs, split_cfg)
+            if depth_result is not None:
+                results["depth"] = depth_result
+            elif depth_skip:
+                skipped["depth"] = depth_skip
+            if depth_map is not None and self.dump is not None:
+                vis = depth_map - float(depth_map.min())
+                span = float(vis.max()) or 1.0
+                self.dump.write_png("04_segment/depth.png", (vis / span * 255.0).astype(np.uint8))
+        if bool(split_cfg.get("compare", False)) or str(split_cfg.get("strategy") or "occlusion") == "parsing":
+            parsing, parse_skip = self._hair_split_parsing(image, hair.visible, split_cfg)
+            if parsing is not None:
+                results["parsing"] = parsing
+            elif parse_skip:
+                skipped["parsing"] = parse_skip
+        chosen_name = str(split_cfg.get("strategy") or "occlusion")
+        chosen = results.get(chosen_name) or results.get("occlusion")
+        if chosen is None or int((chosen.front > 0).sum()) < min_front:
+            return
+        peel = bool(split_cfg.get("peel_back", True))
+        if peel:
+            hair.visible = chosen.back
+        kept.append(_layer("hair_front", chosen.front, hair.score, f"hair_split {chosen.strategy}: {chosen.notes}"))
         for bucket in (self.missing, self.needs_click):
             if "hair_front" in bucket:
                 bucket.remove("hair_front")
-        if self.dump is not None:
-            self.dump.write_json(
-                "04_segment/hair_split.json",
-                {
-                    "applied": True,
-                    "front_px": int(front.sum()),
-                    "back_px": int(hair_vis.sum()),
-                    "cover_px": int(front.sum()),
-                    "dilate_px": dilate_px,
-                    "peeled": False,
-                },
-            )
+        if self.dump is None:
+            return
+        report = {
+            "applied": True,
+            "strategy": chosen.strategy,
+            "peel_back": peel,
+            "front_px": int((chosen.front > 0).sum()),
+            "back_px": int((chosen.back > 0).sum()),
+            "skipped": skipped,
+            "strategies": {name: dict(item.extras) for name, item in results.items()},
+        }
+        self.dump.write_json("04_segment/hair_split.json", report)
+        for name, item in results.items():
+            self.dump.write_png(f"04_segment/hair_split_{name}.png", masked_rgba(image, item.front))
+            self.dump.write_png(f"04_segment/hair_split_{name}.mask.png", item.front)
+            self.dump.write_png(f"04_segment/hair_split_{name}_back.png", masked_rgba(image, item.back))
+        self.dump.write_png("04_segment/bangs_region.png", bangs)
+
+    def _hair_split_depth(self, image, hair, face, bangs, split_cfg) -> tuple:
+        depth_cfg = split_cfg.get("depth") or {}
+        if not bool(depth_cfg.get("enabled", True)):
+            return None, "disabled", None
+        from layerforge.backends.detect.depth_anything import DepthAnythingMap
+
+        backend = DepthAnythingMap(self.cfg)
+        allow_hub = bool(depth_cfg.get("allow_hub", False))
+        if not backend.available() and not allow_hub:
+            return None, "no local depth weights", None
+        try:
+            depth = backend.predict(image)
+        except Exception as exc:
+            return None, f"depth failed: {exc}", None
+        if depth is None:
+            return None, "depth returned empty", None
+        result = split_depth(
+            hair,
+            face,
+            depth,
+            bangs=bangs,
+            eps=float(depth_cfg.get("eps", 0.04)),
+            min_front_px=int(split_cfg.get("min_front_px", 32)),
+        )
+        if bool(depth_cfg.get("sam_refine", True)):
+            refined = self._sam_refine_hair(hair, result.front, result.back)
+            if refined is not None:
+                result.front = refined
+                result.back = ((hair > 0) & (refined == 0)).astype(np.uint8) * 255
+                result.notes += "; sam2 refined"
+                result.extras["front_px"] = int((result.front > 0).sum())
+                result.extras["back_px"] = int((result.back > 0).sum())
+        return result, None, depth
+
+    def _hair_split_parsing(self, image, hair, split_cfg) -> tuple:
+        parse_cfg = split_cfg.get("parsing") or {}
+        if not bool(parse_cfg.get("enabled", True)):
+            return None, "disabled"
+        from layerforge.backends.detect.anime_parse import AnimeHairParse
+
+        backend = AnimeHairParse(self.cfg)
+        if not backend.available():
+            return None, "no local anime_parse weights"
+        coarse = backend.predict(image)
+        if coarse is None:
+            return None, "parser produced no masks"
+        front_c, back_c = coarse
+        result = split_parsing(
+            hair,
+            front_c,
+            back_c,
+            erode_px=int(parse_cfg.get("erode_px", 8)),
+            min_front_px=int(split_cfg.get("min_front_px", 32)),
+        )
+        if bool(parse_cfg.get("sam_refine", True)):
+            pos = result.extras.get("pos_points") or sample_points(result.front, int(parse_cfg.get("pos_points", 6)))
+            neg = result.extras.get("neg_points") or sample_points(result.back, int(parse_cfg.get("neg_points", 4)))
+            refined = self._sam_refine_hair(hair, result.front, result.back, pos=pos, neg=neg)
+            if refined is not None:
+                result.front = refined
+                result.back = ((hair > 0) & (refined == 0)).astype(np.uint8) * 255
+                result.notes += "; sam2 refined"
+        return result, None
+
+    def _sam_refine_hair(
+        self,
+        hair: np.ndarray,
+        front: np.ndarray,
+        back: np.ndarray,
+        *,
+        pos: list[tuple[float, float]] | None = None,
+        neg: list[tuple[float, float]] | None = None,
+    ) -> np.ndarray | None:
+        if self.sam2 is None or not hasattr(self.sam2, "predict_box_points"):
+            return None
+        vis = hair > 0
+        if not vis.any():
+            return None
+        ys, xs = np.where(vis)
+        box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
+        pos = list(pos or sample_points(front, 6))
+        neg = list(neg or sample_points(back, 4))
+        if not pos:
+            return None
+        mask, _score = self.sam2.predict_box_points(box, pos, neg)
+        if mask is None:
+            return None
+        refined = (mask > 0) & vis
+        if int(refined.sum()) < 32:
+            return None
+        return refined.astype(np.uint8) * 255
 
     def _apply_face_split(self, image: np.ndarray, kept: list[LayerMask]) -> list[LayerMask]:
         split_cfg = (self.cfg.get("cascade") or {}).get("face_split") or {}
