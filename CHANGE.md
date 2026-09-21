@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — SAM3 文本切件接上并跑通 6 张
+
+- 做了：核对 `pip install -e sam3` 把 numpy 降到 1.26.4（layerforge / opencv 要 ≥2），已改回 2.5.3；补 einops；Windows 没有 triton / pycocotools，adapter 只给图像文本路径打桩，不走 tracker。官方 API：PIL `set_image` + `set_text_prompt`、实例 mask 取并、本地 `sam3.pt`（`load_from_HF=False`）、显式 BPE、bf16 autocast。cascade 命中写 `sam3.text`，未命中回 SAM2 并记 `sam3_missed`；非空 SAM3 选区落到 `04_segment/sam3_*.png` + `sam3.json`。前发几何没改。AniSeg 仍是整角色（已经在用）；bizarre-pose-estimator 是姿态+前后景，不是前后发 parser，parsing 继续跳过。**没改 schema、没重开 face_split、没切脖子**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（158 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<id>/steps/04_segment/sam3.json`。6 张整发+脸都是 `sam3.text`（hair px：296=214266、4034=221859、458=61372、640=64605、908=92719、a163=132151）。衣服 4/6 SAM3；908 `arm_l`/`arm_r` 首次 SAM3 切出。occlusion 前发（未改）：296=6661、4034=19566、458=7517、640=5739、908=13525、a163=14674。`missing=[]`，schema 仍 v2
+- 未做 / 已知缺陷：sam3 声明 `numpy>=1.26,<2`，运行用的是 2.5.3。clone 目录名叫 `sam3/` 会挡住包的 `__file__`（已用 model_builder 路径找 BPE）。body 的 `anime torso`/`bare torso` SAM3 空，仍走残差。458/908 衣服 SAM3 空走 SAM2。296 脸 SAM3 仍缺一块、带一点发。前发仍是 occlusion 眉条，没接到头顶。parsing 无前后发权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — 方框打孔修掉；Depth 换成 V2 Base
 
 - 做了：4034 `01_hair_back` 方框不是 SAM 切坏整发，是 `peel_back` 把矩形 `bangs_region`（眉点 `fill_box` 用填满脸裁块的高度往上扩，几乎等于脸 crop）从整发挖掉；`hair_whole.png` 当时就是完整的。现刘海先验改成眉/眼凸包 ∩ 头发，不再 `fill_box`；`peel_back` 默认 false，04 dump 的 `01_hair_back` 与 `hair_whole` 同像素。Depth 换成 `Depth-Anything-V2-Base-hf`（另缓存 `model/depth_anything_base`），`eps` 0.04→0.10，关掉 depth 的 SAM refine。阈值写入 `hair_split.json`。**没改 schema、没改 .venv、没重开 face_split**

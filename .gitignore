@@ -14,6 +14,9 @@ skills/
 # local one-off scripts, not product
 tmp_scripts/
 
+# Meta SAM3 source checkout (editable install into .venv; not product)
+/sam3/
+
 # outputs, local images, and local overrides
 runs/
 test_input/

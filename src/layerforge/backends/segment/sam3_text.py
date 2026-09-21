@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +17,7 @@ class Sam3TextMasker:
     def __init__(self, cfg: dict) -> None:
         self.cfg = cfg
         self._predictor = None
+        self.load_error: str | None = None
 
     def _checkpoint(self) -> Path:
         paths = self.cfg.get("paths") or {}
@@ -32,21 +35,24 @@ class Sam3TextMasker:
     def _load(self) -> None:
         if self._predictor is not None:
             return
+        if self.load_error:
+            raise RuntimeError(self.load_error)
         try:
             import torch
         except ImportError as exc:
-            raise RuntimeError("sam3.text needs torch.") from exc
+            self.load_error = "sam3.text needs torch."
+            raise RuntimeError(self.load_error) from exc
         if not torch.cuda.is_available():
-            raise RuntimeError("sam3.text needs CUDA. Refusing CPU.")
-        ckpt = self._checkpoint()
-        last_err = None
-        for builder in (_build_sam3_official,):
-            try:
-                self._predictor = builder(ckpt)
-                return
-            except Exception as exc:
-                last_err = exc
-        raise RuntimeError(f"Could not load SAM3 from {ckpt}: {last_err}") from last_err
+            self.load_error = "sam3.text needs CUDA. Refusing CPU."
+            raise RuntimeError(self.load_error)
+        try:
+            ckpt = self._checkpoint()
+            self._predictor = _build_sam3_official(ckpt)
+        except Exception as exc:
+            self.load_error = str(exc) if str(exc) else repr(exc)
+            if "Could not load SAM3" not in self.load_error:
+                self.load_error = f"Could not load SAM3: {self.load_error}"
+            raise RuntimeError(self.load_error) from exc
 
     def predict_text(
         self,
@@ -59,7 +65,11 @@ class Sam3TextMasker:
         except RuntimeError:
             return None
         rgb = image[:, :, :3]
-        mask = self._predictor(rgb, query)
+        try:
+            mask = self._predictor(rgb, query)
+        except Exception as exc:
+            self.load_error = f"SAM3 infer failed ({query}): {exc}"
+            return None
         if mask is None:
             return None
         chosen = np.asarray(mask).astype(bool)
@@ -70,22 +80,75 @@ class Sam3TextMasker:
         return chosen.astype(np.uint8) * 255
 
 
-def _build_sam3_official(ckpt: Path):
-    from sam3.model_builder import build_sam3_image_model
+def _install_optional_import_stubs() -> None:
+    """SAM3 image text does not need tracker EDT or COCO loaders; Windows often lacks both."""
+    try:
+        import triton  # noqa: F401
+    except ImportError:
+        _stub_edt()
+    _stub_pycocotools()
 
-    model = build_sam3_image_model(checkpoint_path=str(ckpt))
-    model.cuda()
-    model.eval()
+
+def _stub_pycocotools() -> None:
+    try:
+        from pycocotools import mask as _mask  # noqa: F401
+        return
+    except ImportError:
+        pass
+    pkg = types.ModuleType("pycocotools")
+    pkg.__path__ = []  # type: ignore[attr-defined]
+    mask = types.ModuleType("pycocotools.mask")
+    sys.modules["pycocotools"] = pkg
+    sys.modules["pycocotools.mask"] = mask
+    pkg.mask = mask
+
+
+def _stub_edt() -> None:
+    if "sam3.model.edt" in sys.modules:
+        return
+    edt = types.ModuleType("sam3.model.edt")
+
+    def edt_triton(*_args, **_kwargs):
+        raise RuntimeError("SAM3 tracker EDT needs triton (not shipped on Windows).")
+
+    edt.edt_triton = edt_triton
+    sys.modules["sam3.model.edt"] = edt
+
+
+def _install_windows_edt_stub() -> None:
+    _install_optional_import_stubs()
+
+
+def _build_sam3_official(ckpt: Path):
+    _install_optional_import_stubs()
+    import sam3.model_builder as mb
+    from sam3.model.sam3_image_processor import Sam3Processor
+    from PIL import Image
+
+    bpe = Path(mb.__file__).resolve().parent / "assets" / "bpe_simple_vocab_16e6.txt.gz"
+    if not bpe.is_file():
+        raise RuntimeError(f"SAM3 BPE vocab missing: {bpe}")
+    model = mb.build_sam3_image_model(
+        checkpoint_path=str(ckpt),
+        bpe_path=str(bpe),
+        load_from_HF=False,
+        device="cuda",
+        eval_mode=True,
+        enable_inst_interactivity=False,
+    )
+    processor = Sam3Processor(model)
+    cache: dict = {"key": None, "state": None}
 
     def _predict(rgb: np.ndarray, query: str):
         import torch
 
-        from sam3.model.sam3_image_processor import Sam3Processor
-
-        processor = Sam3Processor(model)
-        state = processor.set_image(rgb)
-        with torch.no_grad():
-            out = processor.set_text_prompt(prompt=query, state=state)
+        key = (rgb.shape, int(rgb.dtype.itemsize), int(rgb.ctypes.data))
+        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            if cache["key"] != key:
+                pil = Image.fromarray(rgb.astype(np.uint8))
+                cache["state"] = processor.set_image(pil)
+                cache["key"] = key
+            out = processor.set_text_prompt(prompt=query, state=cache["state"])
         masks = out.get("masks") if isinstance(out, dict) else None
         if masks is None:
             return None
@@ -93,10 +156,14 @@ def _build_sam3_official(ckpt: Path):
         if hasattr(arr, "detach"):
             arr = arr.detach().cpu().numpy()
         arr = np.asarray(arr)
+        if arr.size == 0:
+            return None
         if arr.ndim == 4:
-            arr = arr[0, 0]
+            arr = arr.any(axis=(0, 1))
         elif arr.ndim == 3:
-            arr = arr[0]
+            arr = arr.any(axis=0)
+        elif arr.ndim != 2:
+            return None
         return arr > 0.5
 
     return _predict

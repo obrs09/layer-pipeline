@@ -8,7 +8,12 @@ from layerforge.config import resolve_path
 
 
 class AnimeHairParse:
-    """Optional front/back hair parser. Skips unless a local checkpoint is present."""
+    """Optional front/back hair parser. Not AniSeg and not bizarre-pose-estimator.
+
+    AniSeg/isnetis is already the whole-character cut. bizarre-pose-estimator is
+    illustrated pose plus fg/bg, not bangs vs back hair. This backend stays
+    skipped until a real hair-parse checkpoint is in model/anime_parse.
+    """
 
     name = "anime_hair_parse"
 
@@ -28,7 +33,7 @@ class AnimeHairParse:
         return any(path.glob("*.onnx")) or any(path.glob("config.json")) or any(path.glob("*.pt"))
 
     def predict(self, image: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
-        """Return (front_coarse, back_coarse) uint8 masks, or None if no usable weights."""
+        """Return (front_coarse, back_coarse) uint8 masks, or None if no hair-parse weights."""
         if not self.available():
             return None
         return None

@@ -25,6 +25,7 @@ gpu = [
   "safetensors",
   "onnxruntime-gpu",
   "huggingface_hub",
+  "einops",
 ]
 lama = ["simple-lama-inpainting"]
 psd = ["pytoshop"]

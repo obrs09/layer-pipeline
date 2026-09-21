@@ -73,6 +73,7 @@ class CascadeSegment:
         self.debug_boxes: list[dict] = []
         self.cut_plan: list[str] = []
         self.cut_failures: list[dict] = []
+        self.sam3_attempts: list[dict] = []
         self.character_mask = None
         self.character_qa = None
         self.pose_person = None
@@ -94,6 +95,7 @@ class CascadeSegment:
         self.debug_boxes = []
         self.cut_plan = []
         self.cut_failures = []
+        self.sam3_attempts = []
         self.character_mask = None
         self.character_qa = None
         self.pose_person = None
@@ -395,13 +397,19 @@ class CascadeSegment:
         box: list[float] | None = None
         threshold = self.dino_threshold
 
+        sam3_tried = False
         if self.sam3 is not None:
             for query in queries[:2]:
                 if attempts >= self.max_attempts:
                     break
                 attempts += 1
+                sam3_tried = True
                 mask = self.sam3.predict_text(image, query, character)
+                load_err = getattr(self.sam3, "load_error", None)
+                if load_err and not any(item.startswith("sam3_load_failed:") for item in last_reasons):
+                    last_reasons.append(f"sam3_load_failed:{load_err}")
                 if mask is None:
+                    self._trace_sam3(image, role, query, None, used=False)
                     last_reasons.append(f"sam3_empty:{query}")
                     continue
                 if not spec.overlay:
@@ -409,7 +417,9 @@ class CascadeSegment:
                 result = usable(mask, spec, character, others, None)
                 last_reasons = result.reasons
                 if result.ok:
+                    self._trace_sam3(image, role, query, result.mask, used=True)
                     return _layer(role, result.mask, result.score, f"sam3.text query={query}")
+                self._trace_sam3(image, role, query, result.mask, used=False)
                 last_reasons.append(f"sam3_unusable:{query}")
 
         if self.sam2 is None:
@@ -452,11 +462,12 @@ class CascadeSegment:
                 result = usable(mask, spec, character, others_for_cut, box)
                 last_reasons = list(result.reasons)
                 if result.ok:
+                    missed = "; sam3_missed" if sam3_tried else ""
                     return _layer(
                         role,
                         result.mask,
                         min(result.score, float(sam_score)),
-                        f"sam2.box query={query}; score={sam_score:.3f}",
+                        f"sam2.box query={query}; score={sam_score:.3f}{missed}",
                     )
                 last_reasons.append(f"sam2_unusable:{query}")
         self.needs_click.append(role)
@@ -1166,10 +1177,26 @@ class CascadeSegment:
     def _record_failure(self, role: str, reasons: list[str]) -> None:
         self.cut_failures.append({"role": role, "reasons": list(reasons or [])})
 
-    def _dump_failures(self) -> None:
-        if self.dump is None or not self.cut_failures:
+    def _trace_sam3(self, image, role: str, query: str, mask, *, used: bool) -> None:
+        px = 0 if mask is None else int((np.asarray(mask) > 0).sum())
+        rec = {"role": role, "query": query, "px": px, "used": used}
+        err = getattr(self.sam3, "load_error", None) if self.sam3 is not None else None
+        if err:
+            rec["error"] = err
+        self.sam3_attempts.append(rec)
+        if self.dump is None or mask is None or px < 1:
             return
-        self.dump.write_json("04_segment/failures.json", self.cut_failures)
+        safe = "".join(ch if ch.isalnum() else "_" for ch in query)[:40]
+        self.dump.write_png(f"04_segment/sam3_{role}_{safe}.mask.png", mask)
+        self.dump.write_png(f"04_segment/sam3_{role}_{safe}.png", masked_rgba(image, mask))
+
+    def _dump_failures(self) -> None:
+        if self.dump is None:
+            return
+        if self.cut_failures:
+            self.dump.write_json("04_segment/failures.json", self.cut_failures)
+        if self.sam3_attempts:
+            self.dump.write_json("04_segment/sam3.json", self.sam3_attempts)
 
 
 def _box_character_frac(box: list[float], character: np.ndarray) -> float:
