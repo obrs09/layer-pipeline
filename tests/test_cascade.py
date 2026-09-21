@@ -513,6 +513,40 @@ def test_hair_split_occlusion_peels_back():
     )
 
 
+def test_hair_split_peel_back_false_keeps_whole_hair():
+    h, w = 80, 60
+    hair_vis = np.zeros((h, w), dtype=np.uint8)
+    hair_vis[5:50, 10:50] = 255
+    face_vis = np.zeros((h, w), dtype=np.uint8)
+    face_vis[20:42, 18:42] = 255
+    cascade = CascadeSegment(
+        {
+            "cascade": {
+                "hair_split": {
+                    "enabled": True,
+                    "strategy": "occlusion",
+                    "compare": False,
+                    "peel_back": False,
+                    "min_front_px": 16,
+                    "occlusion": {"grow_px": 8, "forehead_frac": 0.4, "bangs_up_frac": 0.1},
+                }
+            }
+        },
+        load_taxonomy(),
+        character=_Cut(),
+    )
+    cascade.inventory = ["hair_back", "hair_front", "face"]
+    kept = [
+        LayerMask(role="hair_back", label="hair", visible=hair_vis.copy(), source="sam"),
+        LayerMask(role="face", label="face", visible=face_vis, source="sam"),
+    ]
+    cascade._split_hair_front(np.zeros((h, w, 3), dtype=np.uint8), kept)
+    by_role = {layer.role: layer for layer in kept}
+    assert "hair_front" in by_role
+    assert int((by_role["hair_back"].visible > 0).sum()) == int((hair_vis > 0).sum())
+    np.testing.assert_array_equal(by_role["hair_back"].visible, hair_vis)
+
+
 def test_whole_hair_dump_written():
     class _Dump:
         def __init__(self):

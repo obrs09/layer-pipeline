@@ -23,28 +23,47 @@ def _as_bool(mask: np.ndarray | None, shape: tuple[int, int]) -> np.ndarray:
     return mask > 0
 
 
-def fill_box(shape: tuple[int, int], box: list[float]) -> np.ndarray:
-    mask = np.zeros(shape, dtype=np.uint8)
-    h, w = shape
-    x0, y0, x1, y1 = [int(round(v)) for v in box]
-    x0, y0 = max(0, x0), max(0, y0)
-    x1, y1 = min(w, x1), min(h, y1)
-    if x1 > x0 and y1 > y0:
-        mask[y0:y1, x0:x1] = 255
-    return mask
+def mask_is_box(mask: np.ndarray, *, fill_min: float = 0.72, edge_min: float = 0.45) -> bool:
+    vis = mask > 0
+    if int(vis.sum()) < 32:
+        return False
+    ys, xs = np.where(vis)
+    y0, y1 = int(ys.min()), int(ys.max()) + 1
+    x0, x1 = int(xs.min()), int(xs.max()) + 1
+    box = max(1, (y1 - y0) * (x1 - x0))
+    fill = int(vis.sum()) / box
+    edge = float(
+        vis[y0, x0:x1].mean() + vis[y1 - 1, x0:x1].mean() + vis[y0:y1, x0].mean() + vis[y0:y1, x1 - 1].mean()
+    ) / 4.0
+    return fill >= fill_min and edge >= edge_min
+
+
+def _hull_from_points(shape: tuple[int, int], points: list[tuple[float, float]], up_px: float) -> np.ndarray:
+    canvas = np.zeros(shape, dtype=np.uint8)
+    if len(points) < 3:
+        return canvas
+    pts = []
+    for x, y in points:
+        pts.append([int(round(x)), int(round(y))])
+        pts.append([int(round(x)), int(round(y - up_px))])
+    hull = cv2.convexHull(np.array(pts, dtype=np.int32))
+    cv2.fillConvexPoly(canvas, hull, 255)
+    return canvas
 
 
 def bangs_region(
     face: np.ndarray,
     keypoints: list[dict] | None = None,
     *,
+    hair: np.ndarray | None = None,
     forehead_frac: float = 0.42,
     bangs_up_frac: float = 0.35,
     min_score: float = 0.2,
 ) -> np.ndarray:
-    """Forehead + eye band where front hair usually sits. Landmarks first, face box fallback."""
+    """Forehead / brow band. Never a filled DINO/SAM face rectangle."""
     h, w = face.shape[:2]
     region = np.zeros((h, w), dtype=np.uint8)
+    hair_b = hair > 0 if hair is not None else None
     brows: list[tuple[float, float]] = []
     eyes: list[tuple[float, float]] = []
     for item in keypoints or []:
@@ -57,39 +76,37 @@ def bangs_region(
                 idx = int(name.split("_")[1])
             except ValueError:
                 continue
-            # 68-pt: 17-26 brows, 36-47 eyes
             if 17 <= idx <= 26:
                 brows.append((x, y))
             elif 36 <= idx <= 47:
                 eyes.append((x, y))
     anchors = brows or eyes
     if len(anchors) >= 3:
-        xs = [p[0] for p in anchors]
-        ys = [p[1] for p in anchors]
-        x0, x1 = min(xs), max(xs)
-        y_brow = min(ys)
-        width = max(8.0, x1 - x0)
-        pad = width * 0.25
-        face_h = 0.0
-        vis = face > 0
-        if vis.any():
-            fy = np.where(vis)[0]
-            face_h = float(fy.max() - fy.min() + 1)
-        up = max(8.0, (face_h or width) * bangs_up_frac)
-        y0 = max(0.0, y_brow - up)
-        y1 = min(float(h), max(ys) + width * 0.15)
-        return fill_box((h, w), [x0 - pad, y0, x1 + pad, y1])
-    vis = face > 0
-    if not vis.any():
+        width = max(8.0, max(p[0] for p in anchors) - min(p[0] for p in anchors))
+        up = max(8.0, width * bangs_up_frac)
+        region = _hull_from_points((h, w), anchors, up)
+        if hair_b is not None:
+            region = ((region > 0) & hair_b).astype(np.uint8) * 255
         return region
-    ys, xs = np.where(vis)
+    vis = face > 0
+    if vis.any():
+        ys, xs = np.where(vis)
+    elif hair_b is not None and hair_b.any():
+        ys, xs = np.where(hair_b)
+    else:
+        return region
     y0, y1 = int(ys.min()), int(ys.max()) + 1
     x0, x1 = int(xs.min()), int(xs.max()) + 1
     split = y0 + max(4, int((y1 - y0) * forehead_frac))
+    y_top = max(0, y0 - int((y1 - y0) * bangs_up_frac * 0.25))
     band = np.zeros((h, w), dtype=np.uint8)
-    band[max(0, y0 - int((y1 - y0) * bangs_up_frac)) : split, x0:x1] = 255
-    halo = dilate_mask(face, 10) > 0
-    return ((band > 0) & halo).astype(np.uint8) * 255
+    band[y_top:split, x0:x1] = 255
+    out = band > 0
+    if vis.any() and not mask_is_box(face):
+        out &= vis
+    if hair_b is not None:
+        out &= hair_b
+    return out.astype(np.uint8) * 255
 
 
 def lower_face(face: np.ndarray, bangs: np.ndarray) -> np.ndarray:
@@ -125,7 +142,7 @@ def split_occlusion(
     keypoints: list[dict] | None = None,
     forehead_frac: float = 0.42,
     bangs_up_frac: float = 0.35,
-    grow_px: int = 48,
+    grow_px: int = 16,
     barrier_dilate_px: int = 2,
     min_front_px: int = 32,
 ) -> HairSplitResult:
@@ -133,12 +150,15 @@ def split_occlusion(
     shape = hair.shape[:2]
     hair_b = _as_bool(hair, shape)
     face_b = _as_bool(face, shape)
+    face_box = mask_is_box(face)
     bangs = bangs_region(
         face if face is not None else np.zeros(shape, dtype=np.uint8),
         keypoints,
+        hair=hair,
         forehead_frac=forehead_frac,
         bangs_up_frac=bangs_up_frac,
     )
+    bangs_box = mask_is_box(bangs)
     covering = hair_b & face_b & (bangs > 0)
     seeds = (hair_b & (bangs > 0)) | covering
     barrier = _as_bool(clothes, shape) | _as_bool(body, shape) | (lower_face(face, bangs) > 0)
@@ -146,7 +166,8 @@ def split_occlusion(
         barrier = dilate_mask(barrier.astype(np.uint8) * 255, barrier_dilate_px) > 0
     walkable = hair_b & ~barrier
     walkable |= seeds
-    front = grow_geodesic(seeds.astype(np.uint8) * 255, walkable.astype(np.uint8) * 255, max_dist=grow_px) > 0
+    grow = 8 if bangs_box else grow_px
+    front = grow_geodesic(seeds.astype(np.uint8) * 255, walkable.astype(np.uint8) * 255, max_dist=grow) > 0
     front &= hair_b
     if int(front.sum()) < min_front_px:
         front = covering
@@ -162,6 +183,9 @@ def split_occlusion(
             "cover_px": int(covering.sum()),
             "front_px": int(front.sum()),
             "back_px": int(back.sum()),
+            "face_is_box": face_box,
+            "bangs_is_box": bangs_box,
+            "grow_px": int(grow),
         },
     )
 
@@ -182,7 +206,7 @@ def split_depth(
         depth = cv2.resize(depth.astype(np.float32), (hair.shape[1], hair.shape[0]), interpolation=cv2.INTER_LINEAR)
     span = float(np.percentile(depth, 95) - np.percentile(depth, 5)) or 1.0
     cut = max(float(eps) * span, 1e-6)
-    bangs_m = bangs if bangs is not None else bangs_region(face)
+    bangs_m = bangs if bangs is not None else bangs_region(face, hair=hair)
     z_face = float(np.median(depth[face_b])) if face_b.any() else float(np.median(depth))
     low = hair_b & (depth < (z_face - cut))
     high = hair_b & (depth > (z_face + cut))
@@ -205,6 +229,7 @@ def split_depth(
         extras={
             "z_face": z_face,
             "sign": sign,
+            "eps": float(eps),
             "cut": cut,
             "front_px": int(front.sum()),
             "back_px": int(back.sum()),

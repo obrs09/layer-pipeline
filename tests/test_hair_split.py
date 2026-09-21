@@ -82,3 +82,14 @@ def test_landmark_bangs_are_above_brows():
     region = bangs_region(face, kpts, bangs_up_frac=0.4)
     assert int(region[12, 20]) == 255
     assert int(region[28, 20]) == 0
+
+
+def test_bangs_region_does_not_fill_face_crop():
+    face = np.zeros((80, 80), dtype=np.uint8)
+    face[20:60, 20:60] = 255
+    hair = np.zeros((80, 80), dtype=np.uint8)
+    hair[8:72, 12:68] = 255
+    region = bangs_region(face, hair=hair, forehead_frac=0.3)
+    assert int(region[50, 40]) == 0
+    assert int((region > 0).sum()) < int((face > 0).sum())
+    assert int((region[20:60, 20:60] > 0).sum()) < 40 * 40 * 0.55

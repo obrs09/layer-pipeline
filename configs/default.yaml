@@ -39,18 +39,18 @@ cascade:
     enabled: true
     strategy: occlusion
     compare: true
-    peel_back: true
+    peel_back: false
     min_front_px: 32
     occlusion:
       forehead_frac: 0.42
       bangs_up_frac: 0.35
-      grow_px: 48
+      grow_px: 16
       barrier_dilate_px: 2
     depth:
       enabled: true
       allow_hub: true
-      eps: 0.04
-      sam_refine: true
+      eps: 0.10
+      sam_refine: false
     parsing:
       enabled: true
       erode_px: 8
@@ -131,8 +131,8 @@ paths:
   dino_dir: model/grounding_dino
   lama_dir: model/lama
   sd15_dir: model/sd15
-  depth_anything_dir: model/depth_anything
-  depth_anything_model: depth-anything/Depth-Anything-V2-Small-hf
+  depth_anything_dir: model/depth_anything_base
+  depth_anything_model: depth-anything/Depth-Anything-V2-Base-hf
   anime_parse_dir: model/anime_parse
 
 export:

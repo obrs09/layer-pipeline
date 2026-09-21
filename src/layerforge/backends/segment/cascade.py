@@ -12,7 +12,7 @@ from layerforge.ops.character_qa import (
 )
 from layerforge.ops.face_split import split_face_colors
 from layerforge.ops.hair_hint import fill_box, hair_positive
-from layerforge.ops.hair_split import bangs_region, sample_points, split_depth, split_occlusion, split_parsing
+from layerforge.ops.hair_split import bangs_region, mask_is_box, sample_points, split_depth, split_occlusion, split_parsing
 from layerforge.ops.inventory import build_inventory
 from layerforge.ops.morph import dilate_mask, morph_open
 from layerforge.ops.trace import masked_rgba
@@ -933,7 +933,7 @@ class CascadeSegment:
             keypoints=self.pose_keypoints,
             forehead_frac=float(occ_cfg.get("forehead_frac", 0.42)),
             bangs_up_frac=float(occ_cfg.get("bangs_up_frac", 0.35)),
-            grow_px=int(occ_cfg.get("grow_px", 48)),
+            grow_px=int(occ_cfg.get("grow_px", 16)),
             barrier_dilate_px=int(occ_cfg.get("barrier_dilate_px", 2)),
             min_front_px=min_front,
         )
@@ -942,6 +942,7 @@ class CascadeSegment:
         bangs = bangs_region(
             face.visible,
             self.pose_keypoints,
+            hair=hair.visible,
             forehead_frac=float(occ_cfg.get("forehead_frac", 0.42)),
             bangs_up_frac=float(occ_cfg.get("bangs_up_frac", 0.35)),
         )
@@ -965,7 +966,8 @@ class CascadeSegment:
         chosen = results.get(chosen_name) or results.get("occlusion")
         if chosen is None or int((chosen.front > 0).sum()) < min_front:
             return
-        peel = bool(split_cfg.get("peel_back", True))
+        front_is_box = mask_is_box(chosen.front)
+        peel = bool(split_cfg.get("peel_back", False))
         if peel:
             hair.visible = chosen.back
         kept.append(_layer("hair_front", chosen.front, hair.score, f"hair_split {chosen.strategy}: {chosen.notes}"))
@@ -974,14 +976,36 @@ class CascadeSegment:
                 bucket.remove("hair_front")
         if self.dump is None:
             return
+        depth_cfg = split_cfg.get("depth") or {}
+        parse_cfg = split_cfg.get("parsing") or {}
+        paths = self.cfg.get("paths") or {}
         report = {
             "applied": True,
             "strategy": chosen.strategy,
             "peel_back": peel,
+            "front_is_box": front_is_box,
             "front_px": int((chosen.front > 0).sum()),
             "back_px": int((chosen.back > 0).sum()),
             "skipped": skipped,
             "strategies": {name: dict(item.extras) for name, item in results.items()},
+            "thresholds": {
+                "occlusion": {
+                    "forehead_frac": float(occ_cfg.get("forehead_frac", 0.42)),
+                    "bangs_up_frac": float(occ_cfg.get("bangs_up_frac", 0.35)),
+                    "grow_px": int(occ_cfg.get("grow_px", 16)),
+                    "barrier_dilate_px": int(occ_cfg.get("barrier_dilate_px", 2)),
+                },
+                "depth": {
+                    "eps": float(depth_cfg.get("eps", 0.10)),
+                    "sam_refine": bool(depth_cfg.get("sam_refine", False)),
+                    "model": str(paths.get("depth_anything_model") or ""),
+                    "dir": str(paths.get("depth_anything_dir") or ""),
+                },
+                "parsing": {"erode_px": int(parse_cfg.get("erode_px", 8))},
+                "min_front_px": min_front,
+                "dino_threshold": (self.cfg.get("cascade") or {}).get("dino_threshold"),
+                "tag_threshold": (self.cfg.get("cascade") or {}).get("tag_threshold"),
+            },
         }
         self.dump.write_json("04_segment/hair_split.json", report)
         for name, item in results.items():
@@ -1011,10 +1035,12 @@ class CascadeSegment:
             face,
             depth,
             bangs=bangs,
-            eps=float(depth_cfg.get("eps", 0.04)),
+            eps=float(depth_cfg.get("eps", 0.10)),
             min_front_px=int(split_cfg.get("min_front_px", 32)),
         )
-        if bool(depth_cfg.get("sam_refine", True)):
+        result.extras["model"] = backend._hub_id()
+        result.extras["sam_refine"] = bool(depth_cfg.get("sam_refine", False))
+        if bool(depth_cfg.get("sam_refine", False)):
             refined = self._sam_refine_hair(hair, result.front, result.back)
             if refined is not None:
                 result.front = refined

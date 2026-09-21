@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — 方框打孔修掉；Depth 换成 V2 Base
+
+- 做了：4034 `01_hair_back` 方框不是 SAM 切坏整发，是 `peel_back` 把矩形 `bangs_region`（眉点 `fill_box` 用填满脸裁块的高度往上扩，几乎等于脸 crop）从整发挖掉；`hair_whole.png` 当时就是完整的。现刘海先验改成眉/眼凸包 ∩ 头发，不再 `fill_box`；`peel_back` 默认 false，04 dump 的 `01_hair_back` 与 `hair_whole` 同像素。Depth 换成 `Depth-Anything-V2-Base-hf`（另缓存 `model/depth_anything_base`），`eps` 0.04→0.10，关掉 depth 的 SAM refine。阈值写入 `hair_split.json`。**没改 schema、没改 .venv、没重开 face_split**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（156 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：6 张 `01_hair_back` px = `hair_whole`（4034=216344，无方洞）。occlusion front：296=6367、4034=13769、458=4863、640=2701、908=9794、a163=16422。Depth Base cut（eps=0.10×span）：296=1.162 / 4034=0.727 / 458=0.417 / 640=0.720 / 908=1.443 / a163=0.748；4034 depth front 48362（Small 当时 214507）。其它：occlusion grow_px=16、forehead_frac=0.42、bangs_up_frac=0.35、min_front_px=32、barrier_dilate=2；parsing erode=8；dino=0.25；tag=0.35
+- 未做 / 已知缺陷：parsing 仍跳过。包 `layers/10_hair_back` 仍会被 mutex 抠掉填满的脸裁块（4034 脸仍是方的），那不是 04 dump 的 peel。occlusion 前发偏小（只盖住眉区）。Depth Base 比 Small 像样，但仍不是包默认。640 depth sign=1 前发 47k/78k 仍偏大。458 齿轮火焰、640 肩绒、908 `arm_l` 仍在。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — 前/后发三条策略分开跑，包用遮挡逆向
 
 - 做了：整发切开后 **分别** 跑三条拆分，不混成一条。1) `occlusion`：额头/眉眼先验种子 + 衣服/下脸作屏障测地生长，`back = hair \\ front`，并 `peel_back`。2) `depth`：Depth Anything V2 Small 在脸深度平面切开，结果只落盘对比。3) `parsing`：接口已接，本机无二次元前后发权重则跳过。YAML：`cascade.hair_split.strategy` / `compare`。默认包用 occlusion。**没改 schema、没改 .venv**
