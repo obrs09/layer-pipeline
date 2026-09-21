@@ -11,6 +11,9 @@ __pycache__/
 .cursor/
 skills/
 
+# local one-off scripts, not product
+tmp_scripts/
+
 # outputs, local images, and local overrides
 runs/
 test_input/

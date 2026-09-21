@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — 一次性脚本放到 tmp_scripts 并 gitignore
+
+- 做了：`_tmp_summarize_runs.py` 一类本地验收脚本改放到 `tmp_scripts/`，目录加入 `.gitignore`。切件逻辑没改。908 脸/前发方框只调查，没修。
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（应仍 147 passed）
+- 产物路径：无新 run
+- 未做 / 已知缺陷：没修 908/4034 脸裁块填满 DINO 框，也没改 hair_front 几何复制。908 `arm_l` 仍切不出。SAM3 无权重。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-20 — 头发正点离开脸；box_cover 用框减衣服减脸
 
 - 做了：切整发前 DINO peek 一张占位脸（`source=placeholder`），只给负点 / `exclude_roles` / box_cover 用，**不进 kept、不落盘**，真脸仍按原序 SAM。头发正点改成「头发框 ∩ 角色 − 膨胀脸框 − 已切衣服/身体」的质心，可选 Lab 丢掉暖肤（`cascade.hair_hint`）。overlap 检查忽略占位脸，避免刘海被矩形 `overlap_face` 否决。`hair_back.usable.box_cover_minus_exclude: true`：覆盖率分母是框里去掉衣服和脸之后的面积。**没改 schema、没改 .venv**
