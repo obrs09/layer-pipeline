@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — 整发之后用 SAM3 直接切前后发
+
+- 做了：关掉 occlusion / depth / parsing 三条拆分。整发仍是 `query=hair`，落到 `hair_whole`。然后在整发 mask 里用 SAM3 文本切 `front hair`、`bangs`、`back hair`。占整发 ≥85% 的 mask 不当拆分（否则前发等于整顶假发）。后发 query 空或同样是整顶时，后发 = 整发减去前发。已有整发时不再补第二层残差 `hair_back`。**没改 schema、没重开 face_split**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（160 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<id>/steps/04_segment/hair_parts.json`、`hair_whole.json`。整发 px：296=214266、4034=221859、458=61372、640=64605、908=92719、a163=132151。`front hair` 几乎等于整发（296=213359、4034=221198、458=60254、640=64363、908=92396、a163=131656），全部拒掉。`bangs` 只有 458=12656、640=6267 收下，后发是整发减去这块；其余 4 张 bangs/back hair 是 0 或整顶，`missing=['hair_front']`，`hair_back` 保持整发
+- 未做 / 已知缺陷：SAM3 的 front/back 文本分不开前后发，不是「到头顶、宽一点、不到后脑」。458/640 的 bangs 只是额顶一小块。没有退回遮挡条当兜底。body 文本仍空。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — SAM3 文本切件接上并跑通 6 张
 
 - 做了：核对 `pip install -e sam3` 把 numpy 降到 1.26.4（layerforge / opencv 要 ≥2），已改回 2.5.3；补 einops；Windows 没有 triton / pycocotools，adapter 只给图像文本路径打桩，不走 tracker。官方 API：PIL `set_image` + `set_text_prompt`、实例 mask 取并、本地 `sam3.pt`（`load_from_HF=False`）、显式 BPE、bf16 autocast。cascade 命中写 `sam3.text`，未命中回 SAM2 并记 `sam3_missed`；非空 SAM3 选区落到 `04_segment/sam3_*.png` + `sam3.json`。前发几何没改。AniSeg 仍是整角色（已经在用）；bizarre-pose-estimator 是姿态+前后景，不是前后发 parser，parsing 继续跳过。**没改 schema、没重开 face_split、没切脖子**

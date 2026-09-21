@@ -279,7 +279,7 @@ roles:
     overlay: false
     expand_px: 16
     occluded_by: [acc]
-    # Must beat face: front hair is whole-hair ∩ face, a subset of the face mask.
+    # Beats face so bangs stay on this layer. Cut is SAM inside whole hair, not a face subset.
     cut_priority: 85
     required: false
     required_if_tags: [bangs, twintails, long_hair, blunt_bangs, hair_over_one_eye, white_hair, silver_hair, short_hair]

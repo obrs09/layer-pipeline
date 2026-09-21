@@ -34,9 +34,15 @@ cascade:
     enabled: true
     face_dilate_px: 8
     drop_skin: true
-  # Front/back hair: occlusion inversion by default. depth/parsing run when compare is on.
-  hair_split:
+  # After whole-hair SAM, cut front and back inside that mask. Occlusion/depth/parsing stay off.
+  hair_parts:
     enabled: true
+    front_queries: ["front hair", "bangs"]
+    back_queries: ["back hair"]
+    min_px: 32
+    max_whole_frac: 0.85
+  hair_split:
+    enabled: false
     strategy: occlusion
     compare: true
     peel_back: false

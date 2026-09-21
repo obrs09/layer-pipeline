@@ -160,18 +160,17 @@ class CascadeSegment:
                 kept.append(layer)
                 if role == "hair_back":
                     self._dump_hair_whole(image, layer)
-                if role == "face":
-                    self._split_hair_front(image, kept)
+                    self._cut_hair_front_back(image, character, kept)
             elif spec.required or spec.required_if_tags:
                 self._mark_missing(role)
         hair = self._hair_from_residual(character, kept)
         if hair is not None:
             kept.append(hair)
             self._dump_hair_whole(image, hair)
+            self._cut_hair_front_back(image, character, kept)
             for bucket in (self.missing, self.needs_click):
                 if "hair_back" in bucket:
                     bucket.remove("hair_back")
-        self._split_hair_front(image, kept)
         if "hair_front" in inventory and not any(layer.role == "hair_front" for layer in kept):
             self._mark_missing("hair_front")
         if "body" in inventory:
@@ -189,7 +188,7 @@ class CascadeSegment:
         return kept
 
     def _cut_order(self, inventory: list[str]) -> list[str]:
-        """Clothes, then whole hair, then face. Front hair is split later, not SAM-cut."""
+        """Clothes, then whole hair, then face. Front/back hair are a second SAM cut, not this list."""
         overlay: list[str] = []
         mid: list[str] = []
         for role in inventory:
@@ -262,7 +261,7 @@ class CascadeSegment:
         hair = next((layer for layer in kept if layer.role == "hair_back"), None)
         if hair is not None:
             self._dump_hair_whole(image, hair)
-        self._split_hair_front(image, kept)
+            self._cut_hair_front_back(image, character, kept)
         kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
         self._dump_failures()
@@ -692,12 +691,9 @@ class CascadeSegment:
         Pose arm boxes punch held props out of the leftover blob before components run.
         """
         have = {layer.role for layer in others}
-        wanted = [
-            role
-            for role in ("hair_back", "hair_front")
-            if role in self.inventory and role not in have
-        ]
-        if not wanted:
+        if any(role in have for role in ("hair_back", "hair_front")):
+            return None
+        if "hair_back" not in self.inventory and "hair_front" not in self.inventory:
             return None
         faces = [layer for layer in others if layer.role == "face" and int((layer.visible > 0).sum()) > 0]
         spec = self.taxonomy.spec("hair_back")
@@ -909,6 +905,82 @@ class CascadeSegment:
                 "source": layer.source,
                 "notes": layer.notes,
                 "px": int((layer.visible > 0).sum()),
+            },
+        )
+
+    def _cut_hair_front_back(self, image: np.ndarray, character: np.ndarray, kept: list[LayerMask]) -> None:
+        """SAM front and back inside the whole-hair mask. Does not run occlusion, depth, or parsing."""
+        parts_cfg = (self.cfg.get("cascade") or {}).get("hair_parts") or {}
+        if not bool(parts_cfg.get("enabled", True)):
+            return
+        if "hair_front" not in set(self.inventory):
+            return
+        if any(layer.role == "hair_front" and int((layer.visible > 0).sum()) > 0 for layer in kept):
+            return
+        hair = next((layer for layer in kept if layer.role == "hair_back" and int((layer.visible > 0).sum()) > 0), None)
+        if hair is None or self.sam3 is None:
+            return
+        whole = hair.visible > 0
+        whole_px = int(whole.sum())
+        if whole_px < 1:
+            return
+        min_px = int(parts_cfg.get("min_px", 32))
+        max_frac = float(parts_cfg.get("max_whole_frac", 0.85))
+        front_q = list(parts_cfg.get("front_queries") or ["front hair", "bangs"])
+        back_q = list(parts_cfg.get("back_queries") or ["back hair"])
+        front, front_query = self._sam3_inside(image, character, whole, front_q, "hair_front", min_px, max_frac)
+        back, back_query = self._sam3_inside(image, character, whole, back_q, "hair_back", min_px, max_frac)
+        if front is None and back is not None:
+            front = whole & ~back
+            front_query = f"whole minus {back_query}"
+            if int(front.sum()) < min_px or int(front.sum()) / whole_px >= max_frac:
+                front = None
+        if front is None:
+            self._dump_hair_parts(front_query, back_query, None, None, whole_px)
+            return
+        front_b = front & whole
+        if back is None:
+            back_b = whole & ~front_b
+            back_query = f"whole minus {front_query}"
+        else:
+            back_b = (back & whole & ~front_b) | (whole & ~front_b & ~back)
+        if int(front_b.sum()) < min_px or int(back_b.sum()) < min_px:
+            self._dump_hair_parts(front_query, back_query, front_b, back_b, whole_px)
+            return
+        hair.visible = back_b.astype(np.uint8) * 255
+        hair.notes = f"{hair.notes}; back={back_query}".strip("; ")
+        kept.append(_layer("hair_front", front_b.astype(np.uint8) * 255, hair.score, f"sam3.text query={front_query}; clipped to hair_whole"))
+        for bucket in (self.missing, self.needs_click):
+            if "hair_front" in bucket:
+                bucket.remove("hair_front")
+        self._dump_hair_parts(front_query, back_query, front_b, back_b, whole_px)
+
+    def _sam3_inside(self, image, character, whole, queries, role, min_px, max_frac):
+        whole_px = max(1, int(whole.sum()))
+        for query in queries:
+            mask = self.sam3.predict_text(image, query, character)
+            if mask is None:
+                self._trace_sam3(image, role, query, None, used=False)
+                continue
+            chosen = (np.asarray(mask) > 0) & whole
+            px = int(chosen.sum())
+            accepted = px >= min_px and px / whole_px < max_frac
+            self._trace_sam3(image, role, query, chosen.astype(np.uint8) * 255, used=accepted)
+            if accepted:
+                return chosen, query
+        return None, None
+
+    def _dump_hair_parts(self, front_query, back_query, front, back, whole_px: int) -> None:
+        if self.dump is None:
+            return
+        self.dump.write_json(
+            "04_segment/hair_parts.json",
+            {
+                "front_query": front_query,
+                "back_query": back_query,
+                "front_px": 0 if front is None else int(front.sum()),
+                "back_px": 0 if back is None else int(back.sum()),
+                "whole_px": int(whole_px),
             },
         )
 

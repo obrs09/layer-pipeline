@@ -683,3 +683,34 @@ def test_inject_pose_box_goes_first():
     ranked = cascade._inject_pose_box("body", [[0.0, 0.0, 40.0, 40.0]])
     assert ranked[0] == [4.0, 5.0, 10.0, 12.0]
     assert ranked[1] == [0.0, 0.0, 40.0, 40.0]
+
+
+def test_hair_parts_sam_splits_inside_whole_hair():
+    h, w = 40, 40
+    whole = np.zeros((h, w), dtype=np.uint8)
+    whole[4:36, 8:32] = 255
+    front = np.zeros((h, w), dtype=np.uint8)
+    front[4:16, 8:32] = 255
+    back = np.zeros((h, w), dtype=np.uint8)
+    back[16:36, 8:32] = 255
+    cascade = CascadeSegment({}, load_taxonomy(), sam3=_Sam3({"front hair": [front], "back hair": [back]}))
+    cascade.inventory = ["hair_back", "hair_front"]
+    kept = [LayerMask(role="hair_back", label="hair", visible=whole.copy(), source="sam", notes="sam3.text query=hair")]
+    cascade._cut_hair_front_back(np.zeros((h, w, 3), dtype=np.uint8), np.full((h, w), 255, np.uint8), kept)
+    by_role = {layer.role: layer for layer in kept}
+    assert int((by_role["hair_front"].visible > 0).sum()) == int((front > 0).sum())
+    assert int((by_role["hair_back"].visible > 0).sum()) == int((back > 0).sum())
+    assert "front hair" in by_role["hair_front"].notes
+    assert int((by_role["hair_front"].visible & by_role["hair_back"].visible).sum()) == 0
+
+
+def test_hair_parts_rejects_mask_that_is_the_whole_wig():
+    h, w = 40, 40
+    whole = np.zeros((h, w), dtype=np.uint8)
+    whole[4:36, 8:32] = 255
+    cascade = CascadeSegment({}, load_taxonomy(), sam3=_Sam3({"front hair": [whole.copy()], "bangs": [whole.copy()], "back hair": [whole.copy()]}))
+    cascade.inventory = ["hair_back", "hair_front"]
+    kept = [LayerMask(role="hair_back", label="hair", visible=whole.copy(), source="sam", notes="whole")]
+    cascade._cut_hair_front_back(np.zeros((h, w, 3), dtype=np.uint8), np.full((h, w), 255, np.uint8), kept)
+    assert all(layer.role != "hair_front" for layer in kept)
+    assert int((kept[0].visible > 0).sum()) == int((whole > 0).sum())
