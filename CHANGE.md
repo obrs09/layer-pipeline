@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-22 — 整身按姿态拆部件，衣服取交集，脖子只存副本
+
+- 做了：整身（角色减去头和已有饰品）先留下。再用 DWPose 的躯干/左右臂/左右腿框，在整身里 SAM2 切部件。然后在整身上用 `clothes` / `shirt` / `dress` / `jacket` 切衣服（不再用 `anime clothes` 当第一步）。每个部件存 `parts/<role>_clothes`（衣服∩部件）和 `parts/<role>_skin`（去掉衣服的皮肤，给补全）。身体层改成躯干皮肤。四肢皮肤单独成层。整身里既不在姿态部件里、也不在衣服里的像素归 acc。耳朵用 SAM3 `ear` 单独成层，并从身体抠掉。脖子在有脸之后用 SAM3 切，只写 `neck_copy`，`punched: false`，不进包。新增 taxonomy 角色 `ear` / `leg_l` / `leg_r`。**没改 schema**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（165 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<id>/steps/04_segment/figure_parts.json`、`parts/*_skin.png`、`parts/*_clothes.png`、`neck_copy.png`。衣服 px：296=341252、4034=528201、458=195574、640=373249、908=384494、a163=339129。脖子副本：4034=27707、458=1076、640=665、908=5135、a163=3728，296 空。耳朵：296/4034/458/908 是 `ear`，640 是 `anime ear`，a163 没有。`missing` 仍是 4 张 `['hair_front']`
+- 未做 / 已知缺陷：4034 的脖子副本看起来是下巴一块，不是完整脖子。458 的耳朵只有一只。躯干皮肤在衣服盖住时很小（458=3233、a163=795）。姿态框里没被衣服拿走的链条/饰品会算进皮肤，不会进 acc。296 仍是双手机。前发仍缺 4 张。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-22 — 饰品不再被 refine / 补洞画回身体
 
 - 做了：修 FAIL。04 的 body ∩ acc 本来就是 0，`fill_unclaimed_domain` 不把 overlay 当覆盖，把饰品洞整块折进 body。现在 `acc` 和眼/嘴一样留在洞里，不写回身体。`body.occluded_by` 去掉 `acc`，膨胀补洞不再把饰品像素 inpaint 进 `layers/20_body.png`。**没改 schema**

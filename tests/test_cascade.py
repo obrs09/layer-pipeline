@@ -738,3 +738,50 @@ def test_hair_parts_rejects_mask_that_is_the_whole_wig():
     cascade._cut_hair_front_back(np.zeros((h, w, 3), dtype=np.uint8), np.full((h, w), 255, np.uint8), kept)
     assert all(layer.role != "hair_front" for layer in kept)
     assert int((kept[0].visible > 0).sum()) == int((whole > 0).sum())
+
+
+def test_neck_copy_does_not_punch_the_body():
+    h, w = 48, 48
+    body = np.full((h, w), 255, dtype=np.uint8)
+    face = np.zeros((h, w), dtype=np.uint8)
+    face[4:16, 16:32] = 255
+    neck = np.zeros((h, w), dtype=np.uint8)
+    neck[16:24, 18:30] = 255
+    cascade = CascadeSegment({}, load_taxonomy(), sam3=_Sam3({"neck": [neck]}))
+    kept = [
+        LayerMask(role="face", label="face", visible=face, source="sam"),
+        LayerMask(role="body", label="body", visible=body.copy(), source="sam"),
+    ]
+    before = body.copy()
+    cascade._copy_neck(np.zeros((h, w, 3), dtype=np.uint8), np.full((h, w), 255, np.uint8), kept)
+    np.testing.assert_array_equal(kept[1].visible, before)
+    assert all(layer.role != "neck" for layer in kept)
+
+
+def test_pose_parts_save_skin_clothes_and_remainder():
+    h, w = 48, 48
+    body = np.zeros((h, w), dtype=np.uint8)
+    body[8:44, 8:40] = 255
+    clothes = np.zeros((h, w), dtype=np.uint8)
+    clothes[8:20, 8:40] = 255
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        sam2=_Sam2(fill_box=True, shape=(h, w)),
+        sam3=_Sam3({"clothes": [clothes], "shirt": [], "dress": [], "jacket": []}),
+    )
+    cascade.pose_boxes = {
+        "arm_l": [8, 8, 16, 40],
+        "torso": [16, 8, 40, 40],
+    }
+    cascade.pose_points = {"arm_l": [(12, 20)], "torso": [(28, 20)]}
+    kept = [LayerMask(role="body", label="body", visible=body.copy(), source="sam", notes="figure")]
+    cascade._split_figure_parts(np.zeros((h, w, 3), dtype=np.uint8), np.full((h, w), 255, np.uint8), kept)
+    by_role = {}
+    for layer in kept:
+        by_role.setdefault(layer.role, layer)
+    assert "torso skin" in by_role["body"].notes
+    assert int((by_role["clothes"].visible > 0).sum()) > 0
+    assert any(layer.role == "arm_l" and "skin" in layer.notes for layer in kept)
+    assert any(layer.role == "acc" and "neither skin nor clothes" in layer.notes for layer in kept)
+

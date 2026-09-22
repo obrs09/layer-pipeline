@@ -85,8 +85,11 @@ HEAD_IDX = (0, 1, 2, 3, 4)
 ROLE_KPTS = {
     "face": tuple(HEAD_IDX) + tuple(range(FACE0, LEFT_HAND0)),
     "body": (5, 6, 11, 12, 13, 14, 15, 16),
+    "torso": (5, 6, 11, 12),
     "arm_r": (6, 8, 10),
     "arm_l": (5, 7, 9),
+    "leg_r": (12, 14, 16),
+    "leg_l": (11, 13, 15),
 }
 ROLE_POINT_EXTRA = {
     "arm_l": (LEFT_HAND0,),

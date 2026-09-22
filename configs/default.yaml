@@ -26,8 +26,11 @@ cascade:
   # Figure is character minus head and accessories. Clothes and arms stay inside it.
   figure_body:
     enabled: true
-    keep: [clothes, arm_l, arm_r]
+    keep: [clothes, arm_l, arm_r, leg_l, leg_r]
     punch: [hair_back, hair_front, face, eye_l, eye_r, mouth, neck, acc]
+    clothes_queries: ["clothes", "shirt", "dress", "jacket"]
+    neck_queries: ["neck", "anime neck"]
+    ear_queries: ["ear", "anime ear"]
   # Small parts: DINO box → pad → upscale → SAM2 on the crop → remap.
   sam_crop:
     enabled: true

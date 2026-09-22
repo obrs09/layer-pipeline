@@ -11,6 +11,7 @@ from layerforge.ops.character_qa import (
     peers_agree_isnet_outlier,
 )
 from layerforge.ops.face_split import split_face_colors
+from layerforge.ops.figure_parts import split_figure
 from layerforge.ops.hair_hint import fill_box, hair_positive
 from layerforge.ops.hair_split import bangs_region, mask_is_box, sample_points, split_depth, split_occlusion, split_parsing
 from layerforge.ops.inventory import build_inventory
@@ -177,10 +178,14 @@ class CascadeSegment:
             body = self._body_from_residual(character, kept, image)
             if body is not None:
                 kept.append(body)
+                self._copy_neck(image, character, kept)
+                self._cut_ears(image, character, kept)
+                self._split_figure_parts(image, character, kept)
             else:
                 self._mark_missing("body")
         kept_roles = {layer.role for layer in kept}
         folded = set(self._figure_body()["keep"]) if self._figure_body()["enabled"] else set()
+        folded.discard("clothes")
         for spec in self.taxonomy.roles.values():
             if spec.required and spec.name not in kept_roles and spec.name not in folded:
                 self._mark_missing(spec.name)
@@ -195,7 +200,7 @@ class CascadeSegment:
             cfg = {}
         return {
             "enabled": bool(cfg.get("enabled", True)),
-            "keep": list(cfg.get("keep") or ["clothes", "arm_l", "arm_r"]),
+            "keep": list(cfg.get("keep") or ["clothes", "arm_l", "arm_r", "leg_l", "leg_r"]),
             "punch": list(
                 cfg.get("punch")
                 or ["hair_back", "hair_front", "face", "eye_l", "eye_r", "mouth", "neck", "acc"]
@@ -804,6 +809,165 @@ class CascadeSegment:
             if x1 > x0 and y1 > y0:
                 punch[y0:y1, x0:x1] = True
         return punch
+
+    def _copy_neck(self, image: np.ndarray, character: np.ndarray, kept: list[LayerMask]) -> None:
+        """SAM3 neck after the head exists. Saved as a copy; not removed from the figure."""
+        if self.sam3 is None:
+            return
+        if not any(layer.role == "face" and int((layer.visible > 0).sum()) > 0 for layer in kept):
+            return
+        cfg = (self.cfg.get("cascade") or {}).get("figure_body") or {}
+        queries = list(cfg.get("neck_queries") or ["neck", "anime neck"])
+        chosen = None
+        query_used = None
+        for query in queries:
+            mask = self.sam3.predict_text(image, query, character)
+            self._trace_sam3(image, "neck", query, mask, used=mask is not None)
+            if mask is None or int((mask > 0).sum()) < 32:
+                continue
+            chosen = mask
+            query_used = query
+            break
+        if chosen is None:
+            if self.dump is not None:
+                self.dump.write_json("04_segment/neck_copy.json", {"saved": False, "reason": "sam3 empty"})
+            return
+        if self.dump is None:
+            return
+        self.dump.write_png("04_segment/neck_copy.mask.png", chosen)
+        self.dump.write_png("04_segment/neck_copy.png", masked_rgba(image, chosen))
+        self.dump.write_json(
+            "04_segment/neck_copy.json",
+            {"saved": True, "query": query_used, "px": int((chosen > 0).sum()), "punched": False},
+        )
+
+    def _cut_ears(self, image: np.ndarray, character: np.ndarray, kept: list[LayerMask]) -> None:
+        if self.sam3 is None or "ear" not in self.taxonomy.roles:
+            return
+        body = next((layer for layer in kept if layer.role == "body"), None)
+        cfg = (self.cfg.get("cascade") or {}).get("figure_body") or {}
+        queries = list(cfg.get("ear_queries") or ["ear", "anime ear"])
+        spec = self.taxonomy.spec("ear")
+        near = self._ear_neighborhood(character.shape)
+        for query in queries:
+            mask = self.sam3.predict_text(image, query, character)
+            if mask is None:
+                self._trace_sam3(image, "ear", query, None, used=False)
+                continue
+            if near is not None:
+                mask = ((mask > 0) & near).astype(np.uint8) * 255
+            result = usable(mask, spec, character, kept, None)
+            self._trace_sam3(image, "ear", query, result.mask, used=result.ok)
+            if not result.ok:
+                continue
+            ear = result.mask > 0
+            if body is not None:
+                body.visible = ((body.visible > 0) & ~ear).astype(np.uint8) * 255
+            kept.append(_layer("ear", result.mask, result.score, f"sam3.text query={query}"))
+            return
+
+    def _ear_neighborhood(self, shape: tuple[int, int]) -> np.ndarray | None:
+        pts = []
+        for item in self.pose_keypoints:
+            if item.get("name") not in ("lear", "rear"):
+                continue
+            if float(item.get("score") or 0) < 0.25:
+                continue
+            pts.append((float(item["x"]), float(item["y"])))
+        if not pts:
+            return None
+        h, w = shape
+        canvas = np.zeros((h, w), dtype=np.uint8)
+        radius = max(12, int(0.04 * max(h, w)))
+        for x, y in pts:
+            cx, cy = int(round(x)), int(round(y))
+            x0, y0 = max(0, cx - radius), max(0, cy - radius)
+            x1, y1 = min(w, cx + radius + 1), min(h, cy + radius + 1)
+            canvas[y0:y1, x0:x1] = 255
+        return canvas > 0 if int(canvas.sum()) else None
+
+    def _split_figure_parts(self, image: np.ndarray, character: np.ndarray, kept: list[LayerMask]) -> None:
+        body = next((layer for layer in kept if layer.role == "body" and int((layer.visible > 0).sum()) > 0), None)
+        if body is None:
+            return
+        part_masks = self._pose_part_masks(image, body.visible)
+        if not part_masks:
+            return
+        clothes = self._clothes_on_body(image, body.visible)
+        split = split_figure(body.visible, part_masks, clothes)
+        self._dump_figure_parts(image, split)
+        body.visible = split.skins["torso"]
+        body.notes = f"{body.notes}; torso skin".strip("; ")
+        for role in ("arm_l", "arm_r", "leg_l", "leg_r"):
+            skin = split.skins[role]
+            if int((skin > 0).sum()) < 64:
+                continue
+            if any(layer.role == role for layer in kept):
+                continue
+            kept.append(_layer(role, skin, 0.7, "pose part skin for completion"))
+        if int((split.clothes > 0).sum()) >= 64:
+            kept.append(_layer("clothes", split.clothes, 0.7, "clothes on figure"))
+        if int((split.remainder > 0).sum()) >= 64:
+            kept.append(_layer("acc", split.remainder, 0.5, "figure neither skin nor clothes"))
+
+    def _pose_part_masks(self, image: np.ndarray, body: np.ndarray) -> dict[str, np.ndarray]:
+        masks: dict[str, np.ndarray] = {}
+        body_b = body > 0
+        for role in ("arm_l", "arm_r", "leg_l", "leg_r", "torso"):
+            box = self.pose_boxes.get(role)
+            if not box:
+                continue
+            mask = None
+            if self.sam2 is not None:
+                pts = list(self.pose_points.get(role) or [])
+                pos = pts[:4] or [((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)]
+                pred, _score = self._sam_predict("body" if role == "torso" else role, box, pos, [])
+                if pred is not None:
+                    mask = pred
+            if mask is None:
+                mask = fill_box(body.shape, box)
+            chosen = (np.asarray(mask) > 0) & body_b
+            if int(chosen.sum()) < 64:
+                continue
+            masks[role] = chosen.astype(np.uint8) * 255
+        return masks
+
+    def _clothes_on_body(self, image: np.ndarray, body: np.ndarray) -> np.ndarray | None:
+        if self.sam3 is None:
+            return None
+        cfg = (self.cfg.get("cascade") or {}).get("figure_body") or {}
+        queries = list(cfg.get("clothes_queries") or ["clothes", "shirt", "dress", "jacket"])
+        union = np.zeros(body.shape, dtype=bool)
+        body_px = max(1, int((body > 0).sum()))
+        for query in queries:
+            mask = self.sam3.predict_text(image, query, body)
+            if mask is None:
+                self._trace_sam3(image, "clothes", query, None, used=False)
+                continue
+            chosen = mask > 0
+            frac = int(chosen.sum()) / body_px
+            used = 0.02 <= frac < 0.92 and int(chosen.sum()) >= 64
+            self._trace_sam3(image, "clothes", query, mask, used=used)
+            if used:
+                union |= chosen
+        if int(union.sum()) < 64:
+            return None
+        return union.astype(np.uint8) * 255
+
+    def _dump_figure_parts(self, image: np.ndarray, split) -> None:
+        if self.dump is None:
+            return
+        self.dump.write_json("04_segment/figure_parts.json", split.notes)
+        for role, mask in split.clothes_parts.items():
+            if int((mask > 0).sum()) < 1:
+                continue
+            self.dump.write_png(f"04_segment/parts/{role}_clothes.mask.png", mask)
+            self.dump.write_png(f"04_segment/parts/{role}_clothes.png", masked_rgba(image, mask))
+        for role, mask in split.skins.items():
+            if int((mask > 0).sum()) < 1:
+                continue
+            self.dump.write_png(f"04_segment/parts/{role}_skin.mask.png", mask)
+            self.dump.write_png(f"04_segment/parts/{role}_skin.png", masked_rgba(image, mask))
 
     def _body_from_residual(
         self,
