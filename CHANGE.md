@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-21 — 身体改成去掉头和饰品的整身，饰品先切
+
+- 做了：不再用 `anime clothes` 把衣服从身体里拆出去。`clothes` / `arm_l` / `arm_r` 留在身体里，也不记 missing。切序改成饰品 → 整发 → 脸 → 眼/嘴。饰品先走 SAM3 文本（`hair ribbon` / `earring` / `hair ornament` / `necklace`，外加标签触发的手机、法杖），没中的 query 再走原来的 DINO+SAM2。身体 = 角色减去头（发、脸、眼、嘴、颈）和饰品。**没改 schema**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（162 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：`runs/flat/<id>/steps/04_segment/` 里 body 备注都是 `figure minus head and acc`，没有 `clothes` 层。a163 身体含白衬衫+外套+裙；4034 含白衬衫+藏青外套；640 含整套蓝衣和披风。饰品：296 手机、4034 耳环、458 耳环+发饰、640 发饰+权杖杆、a163 发饰蝴蝶结。908 没有饰品标签，没切 acc
+- 未做 / 已知缺陷：衣服还没从这层整身再拆开。296 的 smartphone 和 cellphone 切了两层，可能是同一部手机。640 的 wand 只剩一根细杆。a163 腰链、领结还在身体上。头发边缘碎点会留在身体上。前发仍是 4 张 missing。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-21 — 整发之后用 SAM3 直接切前后发
 
 - 做了：关掉 occlusion / depth / parsing 三条拆分。整发仍是 `query=hair`，落到 `hair_whole`。然后在整发 mask 里用 SAM3 文本切 `front hair`、`bangs`、`back hair`。占整发 ≥85% 的 mask 不当拆分（否则前发等于整顶假发）。后发 query 空或同样是整顶时，后发 = 整发减去前发。已有整发时不再补第二层残差 `hair_back`。**没改 schema、没重开 face_split**

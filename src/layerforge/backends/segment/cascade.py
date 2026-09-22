@@ -179,20 +179,37 @@ class CascadeSegment:
                 kept.append(body)
             else:
                 self._mark_missing("body")
+        kept_roles = {layer.role for layer in kept}
+        folded = set(self._figure_body()["keep"]) if self._figure_body()["enabled"] else set()
         for spec in self.taxonomy.roles.values():
-            if spec.required and spec.name not in {layer.role for layer in kept}:
+            if spec.required and spec.name not in kept_roles and spec.name not in folded:
                 self._mark_missing(spec.name)
         kept = self._apply_face_split(image, kept)
         self._dump_boxes(image)
         self._dump_failures()
         return kept
 
+    def _figure_body(self) -> dict:
+        cfg = (self.cfg.get("cascade") or {}).get("figure_body")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        return {
+            "enabled": bool(cfg.get("enabled", True)),
+            "keep": list(cfg.get("keep") or ["clothes", "arm_l", "arm_r"]),
+            "punch": list(
+                cfg.get("punch")
+                or ["hair_back", "hair_front", "face", "eye_l", "eye_r", "mouth", "neck", "acc"]
+            ),
+        }
+
     def _cut_order(self, inventory: list[str]) -> list[str]:
-        """Clothes, then whole hair, then face. Front/back hair are a second SAM cut, not this list."""
+        """Accessories, then whole hair, then face. Clothes stay inside the figure body."""
+        figure = self._figure_body()
+        keep = set(figure["keep"]) if figure["enabled"] else set()
         overlay: list[str] = []
         mid: list[str] = []
         for role in inventory:
-            if role == "body" or role == "hair_front":
+            if role == "body" or role == "hair_front" or role in keep:
                 continue
             spec = self.taxonomy.spec(role)
             if not spec.queries and not spec.overlay:
@@ -212,7 +229,12 @@ class CascadeSegment:
 
         mid.sort(key=mid_key)
         overlay.sort(key=lambda role: -self.taxonomy.spec(role).cut_priority)
-        return mid + overlay
+        ordered = mid + overlay
+        if figure["enabled"]:
+            accs = [role for role in ordered if role == "acc"]
+            rest = [role for role in ordered if role != "acc"]
+            return accs + rest
+        return ordered
 
     def _from_parts(self, image: np.ndarray, parts: list[LayerMask]) -> list[LayerMask]:
         character = np.zeros(image.shape[:2], dtype=np.uint8)
@@ -647,8 +669,6 @@ class CascadeSegment:
         others: list[LayerMask],
     ) -> list[LayerMask]:
         spec = self.taxonomy.spec("acc")
-        if self.boxes is None or self.sam2 is None:
-            return []
         thresh = spec.tag_threshold if spec.tag_threshold > 0 else self.tag_threshold
         scores = {_norm_tag(name): float(score) for name, score in self.tags.items()}
         base_gate = spec.required_if_tags or spec.tag_names
@@ -658,8 +678,24 @@ class CascadeSegment:
         queries.extend(q for q in spec.fired_queries(self.tags, thresh) if q not in queries)
         if not queries:
             return []
-        detections = self.boxes.detect(image, queries, self.dino_threshold)
         layers: list[LayerMask] = []
+        sam3_hit: set[str] = set()
+        if self.sam3 is not None:
+            for query in queries:
+                mask = self.sam3.predict_text(image, query, character)
+                if mask is None:
+                    self._trace_sam3(image, "acc", query, None, used=False)
+                    continue
+                result = usable(mask, spec, character, others + layers, None)
+                self._trace_sam3(image, "acc", query, result.mask, used=result.ok)
+                if not result.ok:
+                    self._record_failure("acc", [f"sam3_unusable:{query}", *result.reasons])
+                    continue
+                layers.append(_layer("acc", result.mask, result.score, f"sam3.text acc query={query}"))
+                sam3_hit.add(query)
+        if self.boxes is None or self.sam2 is None:
+            return layers
+        detections = self.boxes.detect(image, [query for query in queries if query not in sam3_hit], self.dino_threshold) or []
         for query, xyxy, _score in detections[:8]:
             self._trace_box("acc", query, xyxy, detections)
             pos = [_box_center(xyxy)]
@@ -775,6 +811,18 @@ class CascadeSegment:
         others: list[LayerMask],
         image: np.ndarray,
     ) -> LayerMask | None:
+        figure = self._figure_body()
+        if figure["enabled"]:
+            punch = set(figure["punch"])
+            claimed = np.zeros(character.shape, dtype=bool)
+            for layer in others:
+                if layer.role in punch:
+                    claimed |= layer.visible > 0
+            residual = (character > 0) & ~claimed
+            mask = morph_open(residual.astype(np.uint8) * 255, self.morph_open_px)
+            if int((mask > 0).sum()) < 64:
+                return None
+            return _layer("body", mask, 0.8, "figure minus head and acc")
         claimed = np.zeros(character.shape, dtype=bool)
         for layer in others:
             if self.taxonomy.spec(layer.role).overlay:

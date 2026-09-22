@@ -267,7 +267,7 @@ def test_one_eye_box_mirrors_across_face():
     assert by_role["eye_l"].bbox[0] < by_role["eye_r"].bbox[0]
 
 
-def test_body_residual_punches_clothes_and_hair():
+def test_body_keeps_clothes_and_punches_head_and_acc():
     cascade = CascadeSegment({}, load_taxonomy(), character=_Cut(), tagger=_Tagger({}))
     h, w = 128, 96
     character = np.full((h, w), 255, dtype=np.uint8)
@@ -275,15 +275,32 @@ def test_body_residual_punches_clothes_and_hair():
     clothes_vis[50:100, 20:76] = 255
     hair_vis = np.zeros((h, w), dtype=np.uint8)
     hair_vis[4:40, 16:80] = 255
+    acc_vis = np.zeros((h, w), dtype=np.uint8)
+    acc_vis[110:120, 40:50] = 255
     clothes = LayerMask(role="clothes", label="clothes", visible=clothes_vis, source="sam")
     hair = LayerMask(role="hair_back", label="hair", visible=hair_vis, source="sam")
+    acc = LayerMask(role="acc", label="acc", visible=acc_vis, source="sam")
     image = np.full((h, w, 4), 40, dtype=np.uint8)
-    body = cascade._body_from_residual(character, [clothes, hair], image)
+    body = cascade._body_from_residual(character, [clothes, hair, acc], image)
     assert body is not None
-    assert body.visible[70, 48] == 0
+    assert "figure minus head and acc" in body.notes
+    assert body.visible[70, 48] > 0
     assert body.visible[20, 48] == 0
+    assert body.visible[115, 45] == 0
     assert body.visible[120, 48] > 0
-    assert body.visible[49, 48] == 0
+
+
+def test_cut_order_acc_then_hair_then_face():
+    order = CascadeSegment({}, load_taxonomy())._cut_order(
+        ["hair_front", "clothes", "face", "eye_l", "hair_back", "body", "acc", "arm_l"]
+    )
+    assert order[0] == "acc"
+    assert "clothes" not in order
+    assert "arm_l" not in order
+    assert "hair_front" not in order
+    assert "body" not in order
+    assert order.index("hair_back") < order.index("face")
+    assert order.index("face") < order.index("eye_l")
 
 
 def test_rank_boxes_skips_giant_hair_box():
@@ -308,15 +325,7 @@ def test_constrain_mask_clips_to_box():
     assert int(out[7, 7]) == 255
 
 
-def test_cut_order_clothes_hair_then_face():
-    order = CascadeSegment({}, load_taxonomy())._cut_order(
-        ["hair_front", "clothes", "face", "eye_l", "hair_back", "body"]
-    )
-    assert "hair_front" not in order
-    assert order.index("clothes") < order.index("hair_back")
-    assert order.index("hair_back") < order.index("face")
-    assert order.index("face") < order.index("eye_l")
-    assert "body" not in order
+def test_cut_order_skips_neck():
     assert "neck" not in CascadeSegment({}, load_taxonomy())._cut_order(
         ["neck", "clothes", "face", "hair_back"]
     )
@@ -683,6 +692,21 @@ def test_inject_pose_box_goes_first():
     ranked = cascade._inject_pose_box("body", [[0.0, 0.0, 40.0, 40.0]])
     assert ranked[0] == [4.0, 5.0, 10.0, 12.0]
     assert ranked[1] == [0.0, 0.0, 40.0, 40.0]
+
+
+def test_acc_sam3_text_kept_without_dino():
+    ribbon = np.zeros((48, 48), dtype=np.uint8)
+    ribbon[4:10, 20:28] = 255
+    cascade = CascadeSegment(
+        {},
+        load_taxonomy(),
+        sam3=_Sam3({"hair ribbon": [ribbon], "earring": [], "hair ornament": [], "necklace": []}),
+    )
+    cascade.tags = {"hair_ribbon": 0.9}
+    layers = cascade._cut_acc(np.zeros((48, 48, 3), dtype=np.uint8), np.full((48, 48), 255, np.uint8), [])
+    assert len(layers) == 1
+    assert "sam3.text acc query=hair ribbon" in layers[0].notes
+    assert int((layers[0].visible > 0).sum()) == int((ribbon > 0).sum())
 
 
 def test_hair_parts_sam_splits_inside_whole_hair():
