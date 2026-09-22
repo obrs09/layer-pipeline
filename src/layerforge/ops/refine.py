@@ -20,7 +20,7 @@ def refine_masks(
     kept: list[LayerMask] = []
     for layer in layers:
         area = int((layer.visible > 0).sum())
-        if area < min_area:
+        if area < min_area and not (area > 0 and "torso skin" in (layer.notes or "")):
             continue
         kept.append(layer)
     if not mutex or not kept:
@@ -44,14 +44,19 @@ def refine_masks(
         visible = pix & ~claimed
         claimed |= pix
         layer.visible = visible.astype(np.uint8) * 255
-        if morph_open_px > 0:
+        if morph_open_px > 0 and "torso skin" not in (layer.notes or ""):
             layer.visible = morph_open(layer.visible, morph_open_px)
             visible = layer.visible > 0
         if layer.rgba is not None:
             rgba = layer.rgba.copy()
             rgba[~visible, 3] = 0
             layer.rgba = rgba
-    out = [layer for layer in non_overlay if int((layer.visible > 0).sum()) >= min_area]
+    out = [
+        layer
+        for layer in non_overlay
+        if int((layer.visible > 0).sum()) >= min_area
+        or (int((layer.visible > 0).sum()) > 0 and "torso skin" in (layer.notes or ""))
+    ]
     out.extend(_dedupe_overlay(overlay, overlay_iou, overlay_contain))
     return sorted(out, key=lambda m: (taxonomy.spec(m.role).order, -int((m.visible > 0).sum())))
 
@@ -138,7 +143,7 @@ def assign_residual_to_body(
     max_frac: float = 0.04,
     domain: np.ndarray | None = None,
 ) -> list[LayerMask]:
-    """Fold tiny unclaimed crumbs into body. Do not dump leftover hair/clothes."""
+    """Fold tiny unclaimed crumbs into an existing body. Do not invent a new body."""
     if not layers:
         return layers
     fg = foreground_mask(source, background_luma) > 0
@@ -155,21 +160,12 @@ def assign_residual_to_body(
     if leftover / fg_area > max_frac:
         return layers
     bodies = [layer for layer in layers if layer.role == "body"]
-    if bodies:
-        target = max(bodies, key=lambda m: int((m.visible > 0).sum()))
-        vis = (target.visible > 0) | residual
-        target.visible = vis.astype(np.uint8) * 255
-        target.notes = f"{target.notes}; residual fg folded into body".strip("; ")
+    if not bodies:
         return layers
-    layers.append(
-        LayerMask(
-            role="body",
-            label="residual_fg",
-            visible=residual.astype(np.uint8) * 255,
-            source="silhouette",
-            notes="unclaimed foreground after mutex",
-        )
-    )
+    target = max(bodies, key=lambda m: int((m.visible > 0).sum()))
+    vis = (target.visible > 0) | residual
+    target.visible = vis.astype(np.uint8) * 255
+    target.notes = f"{target.notes}; residual fg folded into body".strip("; ")
     return layers
 
 

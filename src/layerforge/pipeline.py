@@ -182,6 +182,7 @@ def run_pipeline(
     masks, split_report = split_face_colors(source, masks, taxonomy, split_cfg)
     if split_report.get("applied"):
         dump.write_json("05_refine/face_split.json", split_report)
+    masks.sort(key=lambda m: (taxonomy.spec(m.role).order, -int((m.visible > 0).sum())))
     log.write("refine", count=len(masks))
     ids = _layer_ids(masks, taxonomy)
     dump.write_layers("05_refine", source, masks, ids)

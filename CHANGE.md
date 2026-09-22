@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-22 — 不再用未认领前景另建一层身体盖住衣服
+
+- 做了：修 FAIL。没有 body 时不再用未认领前景新建一层 `unclaimed foreground after mutex`。带 `torso skin` 的身体即使小于 `min_area`、开运算会磨掉，也留在包里。导出前按 taxonomy 的 order 排序，身体画在衣服和脸下面。**没改 schema**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（166 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：6 张 `preview/diff.png` nonzero=0、dmax=0。a163 的 body 备注是 `figure minus head and acc; torso skin; residual fg folded into body`，不再是单独的 `unclaimed foreground after mutex`
+- 未做 / 已知缺陷：已有身体时，小块未认领前景仍会折进身体（备注里的 `residual fg folded into body`）。`leg_l` / `leg_r` 是皮肤，不是带衣服的腿。4034 脖子副本仍是下巴。458 仍是一只耳朵。前发仍缺 4 张。ORT CUDA 仍缺 `cublasLt64_13.dll`
+
 ## 2026-09-22 — 整身按姿态拆部件，衣服取交集，脖子只存副本
 
 - 做了：整身（角色减去头和已有饰品）先留下。再用 DWPose 的躯干/左右臂/左右腿框，在整身里 SAM2 切部件。然后在整身上用 `clothes` / `shirt` / `dress` / `jacket` 切衣服（不再用 `anime clothes` 当第一步）。每个部件存 `parts/<role>_clothes`（衣服∩部件）和 `parts/<role>_skin`（去掉衣服的皮肤，给补全）。身体层改成躯干皮肤。四肢皮肤单独成层。整身里既不在姿态部件里、也不在衣服里的像素归 acc。耳朵用 SAM3 `ear` 单独成层，并从身体抠掉。脖子在有脸之后用 SAM3 切，只写 `neck_copy`，`punched: false`，不进包。新增 taxonomy 角色 `ear` / `leg_l` / `leg_r`。**没改 schema**

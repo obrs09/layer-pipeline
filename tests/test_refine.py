@@ -52,7 +52,27 @@ def test_eyes_are_not_merged_across_roles():
     assert roles == {"eye_l", "eye_r"}
 
 
-def test_large_unclaimed_fg_not_dumped_on_body():
+def test_missing_body_is_not_replaced_by_residual():
+    clothes = _mask("clothes", "clothes", 4, 4, h=20, w=20)
+    source = np.full((32, 40, 3), 10, dtype=np.uint8)
+    source[0, :] = 255
+    source[-1, :] = 255
+    source[:, 0] = 255
+    source[:, -1] = 255
+    out = assign_residual_to_body([clothes], source, min_area=8, max_frac=0.9)
+    assert all(layer.role != "body" for layer in out)
+
+
+def test_torso_skin_survives_morph_open():
+    body = _mask("body", "body", 8, 8, h=2, w=20)
+    body.notes = "figure minus head and acc; torso skin"
+    face = _mask("face", "face", 0, 0, h=4, w=4)
+    out = refine_masks([body, face], load_taxonomy(), morph_open_px=3, min_area=64)
+    kept = [layer for layer in out if layer.role == "body"]
+    assert kept
+    assert "torso skin" in kept[0].notes
+    assert "unclaimed foreground" not in kept[0].notes
+
     body = _mask("body", "body", 20, 4, h=8, w=8)
     source = np.full((32, 40, 3), 255, dtype=np.uint8)
     source[2:30, 2:38] = 10
