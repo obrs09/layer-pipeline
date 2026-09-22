@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-22 — 饰品不再被 refine / 补洞画回身体
+
+- 做了：修 FAIL。04 的 body ∩ acc 本来就是 0，`fill_unclaimed_domain` 不把 overlay 当覆盖，把饰品洞整块折进 body。现在 `acc` 和眼/嘴一样留在洞里，不写回身体。`body.occluded_by` 去掉 `acc`，膨胀补洞不再把饰品像素 inpaint 进 `layers/20_body.png`。**没改 schema**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（162 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：6 张 `preview/diff.png` nonzero=0。body ∩ acc：04 / 05 / `layers/20_body.png` 都是 0（296 acc 10112、4034 1661、458 8940、640 9153、a163 25155；908 无 acc）。`over_lower_visible=0`。schema 仍 v2。`missing` 仍是 296/4034/908/a163 `['hair_front']`，458/640 `[]`
+- 未做 / 已知缺陷：`unclaimed_in_domain` 仍不把 overlay 算覆盖，所以 coverage `hole_px_after` 等于留在饰品上的洞（296=10119、4034=1694、458=8507、640=9149、908=10、a163=25142），`body_px=0`。没修 296 双手机、458/a163 的 SAM2 hair ribbon 层数、衣服仍在整身里、640 wand 细杆、头发碎点、4 张缺前发
+
 ## 2026-09-21 — 身体改成去掉头和饰品的整身，饰品先切
 
 - 做了：不再用 `anime clothes` 把衣服从身体里拆出去。`clothes` / `arm_l` / `arm_r` 留在身体里，也不记 missing。切序改成饰品 → 整发 → 脸 → 眼/嘴。饰品先走 SAM3 文本（`hair ribbon` / `earring` / `hair ornament` / `necklace`，外加标签触发的手机、法杖），没中的 query 再走原来的 DINO+SAM2。身体 = 角色减去头（发、脸、眼、嘴、颈）和饰品。**没改 schema**

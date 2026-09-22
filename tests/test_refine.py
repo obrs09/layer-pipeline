@@ -194,18 +194,18 @@ def test_unclaimed_blob_creates_body_when_none_was_cut():
     assert not np.any((body.visible > 0) & (domain == 0))
 
 
-def test_overlay_layers_do_not_count_as_cover():
+def test_acc_overlay_is_not_folded_into_body():
     domain = _character()
     source = np.full((96, 80, 3), 40, dtype=np.uint8)
     body = LayerMask(role="body", label="body", visible=domain.copy(), source="sam")
     body.visible[40:60, 20:60] = 0
     acc = LayerMask(role="acc", label="acc", visible=np.zeros_like(domain), source="sam")
     acc.visible[40:60, 20:60] = 255
-    assert _hole_frac([body, acc], domain) > 0.0
     layers, report = fill_unclaimed_domain([body, acc], domain, load_taxonomy(), source, max_dist=4)
-    assert report["hole_px_after"] == 0
-    assert int(layers[0].visible[50, 40]) == 255
-    assert layers[0].role == "body"
+    body_out = next(layer for layer in layers if layer.role == "body")
+    assert int(body_out.visible[50, 40]) == 0
+    assert int(((body_out.visible > 0) & (acc.visible > 0)).sum()) == 0
+    assert report["hole_px_after"] == int((acc.visible > 0).sum())
 
 
 def test_fill_skips_eye_overlay_holes():

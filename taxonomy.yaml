@@ -46,11 +46,10 @@ roles:
     complete: true
     overlay: false
     expand_px: 20
-    occluded_by: [neck, arm_l, arm_r, clothes, face, hair_front, acc]
+    occluded_by: [neck, arm_l, arm_r, clothes, face, hair_front]
     cut_priority: 30
     required: true
-    # Anatomical figure (pose torso/limbs), including occluded parts for inpaint.
-    # Visible flesh is this layer after clothes/hair punch — not hair rims, not bed.
+    # Figure body keeps clothes. Accessories stay on the acc sprite and are not inpainted back.
     queries: ["anime torso", "bare torso", "person body"]
     exclude_roles: [face, hair_front, hair_back, clothes]
     aliases:

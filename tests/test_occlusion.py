@@ -35,11 +35,7 @@ def test_seam_stays_under_occluders():
 
 
 def test_later_layer_seam_does_not_cover_earlier_visible_in_composite():
-    """Body completing under a badge must not seam-dilate into hair visibles.
-
-    That is the sam_flat1 diff.png outline: later occ composited over earlier
-    original pixels.
-    """
+    """Body does not complete under an accessory, and does not spill into hair."""
     source = _source()
     hair = np.zeros(source.shape[:2], dtype=np.uint8)
     hair[:, :20] = 255
@@ -54,9 +50,7 @@ def test_later_layer_seam_does_not_cover_earlier_visible_in_composite():
     ]
     occ = plan_occlusion(layers, source, load_taxonomy(), seam_dilate_px=3)
     body_occ = occ[1] > 0
-    assert body_occ.any()
-    assert not np.any(body_occ & ~(badge > 0))
-    # Seam used to spill into hair visibles that are not the badge.
+    assert not np.any(body_occ & (badge > 0))
     assert not np.any(body_occ & (hair > 0))
     assert occluded_over_lower_visible(layers, occ, load_taxonomy()) == 0
 

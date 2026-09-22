@@ -207,13 +207,14 @@ def fill_unclaimed_domain(
     Thin leftovers (never farther than max_dist from a layer) join the nearest
     non-overlay layer, like seam fill. Anything with real interior becomes body:
     unclaimed flesh, hands, or hair the detectors missed. Returns (layers, report).
-    skip_roles (eyes/mouth) stay punched out of complete layers; the overlay sprite covers them.
+    skip_roles (eyes/mouth/acc) stay punched out; the overlay sprite covers them.
     """
     import cv2
 
     residual = unclaimed_in_domain(layers, domain, taxonomy, source, background_luma)
     hole_before = int(residual.sum())
     skip = {str(name) for name in (skip_roles or ())}
+    skip.add("acc")
     if skip:
         for layer in layers:
             if layer.role in skip:
