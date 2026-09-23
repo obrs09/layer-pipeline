@@ -18,15 +18,17 @@ def open_rgb(path: Path) -> np.ndarray:
     return np.array(image.convert("RGB"), dtype=np.uint8)
 
 
-def save_png(path: Path, array: np.ndarray) -> None:
+def save_png(path: Path, array: np.ndarray, compress_level: int | None = None) -> None:
+    """Lossless PNG. `compress_level` trades file size for encode time; pixels are unchanged."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    kwargs = {} if compress_level is None else {"compress_level": int(compress_level)}
     if array.ndim == 2:
-        Image.fromarray(array, mode="L").save(path)
+        Image.fromarray(array, mode="L").save(path, **kwargs)
         return
     if array.shape[2] == 3:
-        Image.fromarray(array, mode="RGB").save(path)
+        Image.fromarray(array, mode="RGB").save(path, **kwargs)
         return
-    Image.fromarray(array, mode="RGBA").save(path)
+    Image.fromarray(array, mode="RGBA").save(path, **kwargs)
 
 
 def is_image(path: Path) -> bool:

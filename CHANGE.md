@@ -2,6 +2,13 @@
 
 Builder 每次交付更新本文件；回复末尾再贴同一段。Reviewer 对照这里是否诚实。
 
+## 2026-09-23 — 后端跨图复用、调试 PNG 快压、几处向量化；结果不变
+
+- 做了：**bug** ① CLI 每张图都重建全部后端，SAM3/SAM2/SD1.5/五个 ORT 会话每张图重载一遍；`run_pipeline` 新增 `backends` 字典，CLI 一次构建跨图复用。② SAM3 图像嵌入缓存只按 buffer 地址判重、不持有引用；后端一旦复用，下一张图落到同一地址会命中上一张的嵌入。现持有引用。③ 一次 SAM3 推理异常会写进 `load_error`，之后整个进程都跳过 SAM3；改为 `infer_error`，按次记录、成功即清。④ 调试叠色 `role_color` 用了进程随机盐的 `hash()`，每次运行 leg/ear/torso 颜色都不同；改 crc32。**效率** `plan_occlusion` 把 24 次 3×3 膨胀换成一次 (2k+1) 方核，各层 `>0` 只算一次；`drop_crumbs` / `fill_unclaimed_domain` 的逐 label 全帧比较改成 `np.isin` / `np.maximum.at`；`tint_overlay` 只在 mask 外接框内混色；`steps/` 调试 PNG 用 zlib level 1（像素不变，包内 `layers/` `masks/` `preview/` 仍是默认压缩）。**没改 schema、没改 .venv、没改任何阈值或 query**
+- 怎么跑：`.\.venv\Scripts\python.exe -m pytest`（170 passed）；GPU：`.\.venv\Scripts\python.exe -m layerforge run --input test_input/image_no_sag --out runs/flat --segment cascade --inpaint auto`
+- 产物路径：6 张总耗时 601s → 489s（复用后端）→ 357s（加 PNG/叠色）。等价性：旧/新 `plan_occlusion`、`drop_crumbs`、`fill_unclaimed_domain`、`tint_overlay` 在 6 张真实 mask 上 178+ 次比对 0 处不同；4034 单张运行与 6 张复用运行的 isnet/peers/pose/SAM3 mask/关键点逐像素一致；两次新代码整跑之间所有 mask、04/05/06 图层、manifest、json 全部相同
+- 未做 / 已知缺陷：两次运行仍有差异但**不是本次引入**：SD1.5 inpaint 没有 seed，`layers/*.png` 的遮挡补全每次不同；ORT 全在 CPU（缺 `cublasLt64_13.dll`），isnet/WD/DWPose 分数隔天漂 1e-4，4034 角色 mask 差 7px；SAM3 bf16 偶有 2–130px 抖动。`overlay.png` 因叠色改 crc32 与旧运行颜色不同。isnet+ToonOut+MODNet 在 CPU 上每张约 28s，装 CUDA 13 运行库才能提速，未动 .venv
+
 ## 2026-09-22 — 不再用未认领前景另建一层身体盖住衣服
 
 - 做了：修 FAIL。没有 body 时不再用未认领前景新建一层 `unclaimed foreground after mutex`。带 `torso skin` 的身体即使小于 `min_area`、开运算会磨掉，也留在包里。导出前按 taxonomy 的 order 排序，身体画在衣服和脸下面。**没改 schema**

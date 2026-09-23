@@ -27,34 +27,35 @@ def plan_occlusion(
     h, w = layers[0].visible.shape
     fg = foreground_mask(source, background_luma) > 0
     orders = [taxonomy.spec(layer.role).order for layer in layers]
+    visibles = [layer.visible > 0 for layer in layers]
     occluded: dict[int, np.ndarray] = {}
-    kernel = np.ones((3, 3), np.uint8)
     for i, layer in enumerate(layers):
         spec = taxonomy.spec(layer.role)
         if not spec.complete or spec.expand_px <= 0:
             occluded[i] = np.zeros((h, w), dtype=np.uint8)
             continue
-        want = cv2.dilate(layer.visible, kernel, iterations=int(spec.expand_px)) > 0
+        # k passes of a 3x3 box equal one pass of a (2k+1)x(2k+1) box.
+        want = cv2.dilate(layer.visible, _box_kernel(int(spec.expand_px))) > 0
         occluders = np.zeros((h, w), dtype=bool)
         lower = np.zeros((h, w), dtype=bool)
         for j, other in enumerate(layers):
             if j == i:
                 continue
             if orders[j] > spec.order and other.role in spec.occluded_by:
-                occluders |= other.visible > 0
+                occluders |= visibles[j]
             elif orders[j] < spec.order:
-                lower |= other.visible > 0
-        allowed = occluders & ~(layer.visible > 0) & fg & ~lower
+                lower |= visibles[j]
+        allowed = occluders & ~visibles[i] & fg & ~lower
         hole = want & allowed
         if seam_dilate_px > 0 and hole.any():
-            dilated = cv2.dilate(
-                hole.astype(np.uint8) * 255,
-                kernel,
-                iterations=int(seam_dilate_px),
-            )
+            dilated = cv2.dilate(hole.astype(np.uint8) * 255, _box_kernel(int(seam_dilate_px)))
             hole = (dilated > 0) & allowed
         occluded[i] = hole.astype(np.uint8) * 255
     return occluded
+
+
+def _box_kernel(px: int) -> np.ndarray:
+    return np.ones((2 * px + 1, 2 * px + 1), np.uint8)
 
 
 def occluded_over_lower_visible(

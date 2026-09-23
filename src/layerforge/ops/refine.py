@@ -239,18 +239,19 @@ def fill_unclaimed_domain(
         dist_claimed = np.full(residual.shape, np.inf, dtype=np.float32)
 
     n, labels, stats, _ = cv2.connectedComponentsWithStats(residual.astype(np.uint8), connectivity=8)
-    seam = np.zeros(residual.shape, dtype=bool)
-    blob = np.zeros(residual.shape, dtype=bool)
+    # Max depth per component in one pass instead of one full-frame compare per label.
+    depth_per_label = np.zeros(n, dtype=np.float32)
+    np.maximum.at(depth_per_label, labels[residual], dist_claimed[residual].astype(np.float32))
+    blob_ids: list[int] = []
     for k in range(1, n):
-        comp = labels == k
         area = int(stats[k, cv2.CC_STAT_AREA])
-        depth = float(dist_claimed[comp].max())
+        depth = float(depth_per_label[k])
         if area >= min_area and depth > float(max_dist):
-            blob |= comp
+            blob_ids.append(k)
             x, y, w, h = (int(v) for v in stats[k, :4])
             report["blobs"].append({"area": area, "bbox": [x, y, w, h], "depth_px": round(depth, 1)})
-        else:
-            seam |= comp
+    blob = np.isin(labels, blob_ids) if blob_ids else np.zeros(residual.shape, dtype=bool)
+    seam = residual & ~blob
 
     if seam.any():
         if candidates:

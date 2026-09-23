@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run":
         cfg = load_config(args.config)
         inputs = expand_run_inputs(Path(args.input))
+        backends: dict = {}
         for item in inputs:
             job_id = args.job_id if len(inputs) == 1 else None
             out = run_pipeline(
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
                 inpaint_name=args.inpaint,
                 job_id=job_id,
                 dry_run=args.dry_run,
+                backends=backends,
             )
             print(out)
         return 0

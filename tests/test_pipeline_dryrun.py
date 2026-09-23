@@ -138,3 +138,36 @@ def test_export_resets_run_log(tmp_path: Path):
     assert "old-run" not in text
     assert '"event": "start"' in text
     assert text.count('"event": "start"') == 1
+
+
+def test_backends_dict_is_reused_across_runs(tmp_path: Path):
+    job = _make_imagine_job(tmp_path)
+    backends: dict = {}
+    run_pipeline(
+        job,
+        tmp_path / "runs",
+        load_config(),
+        job_id="a",
+        dry_run=True,
+        segment_name="noop_from_parts",
+        inpaint_name="identity",
+        backends=backends,
+    )
+    built = dict(backends)
+    assert len(built) == 2
+    run_pipeline(
+        job,
+        tmp_path / "runs",
+        load_config(),
+        job_id="b",
+        dry_run=True,
+        segment_name="noop_from_parts",
+        inpaint_name="identity",
+        backends=backends,
+    )
+    assert backends == built
+    for key, value in built.items():
+        assert backends[key] is value
+    manifest_a = json.loads((tmp_path / "runs" / "a" / "manifest.json").read_text(encoding="utf-8"))
+    manifest_b = json.loads((tmp_path / "runs" / "b" / "manifest.json").read_text(encoding="utf-8"))
+    assert [layer["role"] for layer in manifest_a["layers"]] == [layer["role"] for layer in manifest_b["layers"]]

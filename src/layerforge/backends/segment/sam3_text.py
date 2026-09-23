@@ -18,6 +18,11 @@ class Sam3TextMasker:
         self.cfg = cfg
         self._predictor = None
         self.load_error: str | None = None
+        self.infer_error: str | None = None
+
+    @property
+    def error(self) -> str | None:
+        return self.load_error or self.infer_error
 
     def _checkpoint(self) -> Path:
         paths = self.cfg.get("paths") or {}
@@ -68,8 +73,10 @@ class Sam3TextMasker:
         try:
             mask = self._predictor(rgb, query)
         except Exception as exc:
-            self.load_error = f"SAM3 infer failed ({query}): {exc}"
+            # One bad query must not disable SAM3 for the rest of the process.
+            self.infer_error = f"SAM3 infer failed ({query}): {exc}"
             return None
+        self.infer_error = None
         if mask is None:
             return None
         chosen = np.asarray(mask).astype(bool)
@@ -137,7 +144,9 @@ def _build_sam3_official(ckpt: Path):
         enable_inst_interactivity=False,
     )
     processor = Sam3Processor(model)
-    cache: dict = {"key": None, "state": None}
+    # Holding `ref` keeps the source buffer alive, so a later image cannot land on the
+    # same address and hit a stale embedding.
+    cache: dict = {"key": None, "state": None, "ref": None}
 
     def _predict(rgb: np.ndarray, query: str):
         import torch
@@ -148,6 +157,7 @@ def _build_sam3_official(ckpt: Path):
                 pil = Image.fromarray(rgb.astype(np.uint8))
                 cache["state"] = processor.set_image(pil)
                 cache["key"] = key
+                cache["ref"] = rgb
             out = processor.set_text_prompt(prompt=query, state=cache["state"])
         masks = out.get("masks") if isinstance(out, dict) else None
         if masks is None:

@@ -18,6 +18,38 @@ def test_short_job_id_from_grok_filename():
     assert short_job_id(path) == "64010c19"
 
 
+def test_role_color_is_stable_across_processes():
+    from layerforge.ops.trace import role_color
+
+    import zlib
+
+    h = zlib.crc32(b"leg_l") % 180
+    assert role_color("leg_l") == (40 + h, 80, 220 - h // 2)
+    assert role_color("body") == (80, 200, 80)
+
+
+def test_tint_overlay_matches_full_frame_blend():
+    from layerforge.ops.trace import tint_overlay
+
+    image = np.full((24, 32, 3), 100, dtype=np.uint8)
+    mask = np.zeros((24, 32), dtype=np.uint8)
+    mask[5:12, 8:20] = 255
+    out = tint_overlay(image, [(mask, (255, 0, 0))], base_dim=0.5, tint=0.5)
+    expect = np.full((24, 32, 3), 50, dtype=np.float32)
+    m = (mask > 0).astype(np.float32)[..., None]
+    expect = expect * (1.0 - 0.5 * m) + np.array((255, 0, 0), np.float32) * (0.5 * m)
+    np.testing.assert_array_equal(out, np.clip(expect, 0, 255).astype(np.uint8))
+
+
+def test_step_dump_png_is_lossless(tmp_path: Path):
+    dump = StepDump(tmp_path, enabled=True)
+    dump.reset()
+    rgba = np.random.default_rng(1).integers(0, 256, size=(16, 20, 4), dtype=np.uint8)
+    dump.write_png("x/y.png", rgba)
+    back = np.array(Image.open(tmp_path / "steps" / "x" / "y.png"))
+    np.testing.assert_array_equal(back, rgba)
+
+
 def test_expand_run_inputs_lists_images(tmp_path: Path):
     folder = tmp_path / "flats"
     folder.mkdir()

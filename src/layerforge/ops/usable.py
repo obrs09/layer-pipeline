@@ -22,22 +22,20 @@ def drop_crumbs(mask: np.ndarray, spec: RoleSpec, ref_area: int) -> np.ndarray:
     if int(vis.sum()) == 0:
         return vis * 255
     num, labels, stats, _ = cv2.connectedComponentsWithStats(vis, connectivity=8)
-    keep = np.zeros_like(vis)
     min_area = max(16, int(spec.crumb_frac * max(1, ref_area)))
-    sizes = []
-    for idx in range(1, num):
-        area = int(stats[idx, cv2.CC_STAT_AREA])
-        sizes.append((area, idx))
+    sizes = [(int(stats[idx, cv2.CC_STAT_AREA]), idx) for idx in range(1, num)]
     sizes.sort(reverse=True)
-    kept = 0
+    kept_ids: list[int] = []
     for area, idx in sizes:
-        if kept >= spec.max_components:
+        if len(kept_ids) >= spec.max_components:
             break
-        if area < min_area and kept > 0:
+        if area < min_area and kept_ids:
             continue
-        keep[labels == idx] = 1
-        kept += 1
-    return (keep * 255).astype(np.uint8)
+        kept_ids.append(idx)
+    if not kept_ids:
+        return np.zeros_like(vis)
+    keep = np.isin(labels, kept_ids)
+    return keep.astype(np.uint8) * 255
 
 
 def usable(

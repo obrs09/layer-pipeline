@@ -431,7 +431,7 @@ class CascadeSegment:
                 attempts += 1
                 sam3_tried = True
                 mask = self.sam3.predict_text(image, query, character)
-                load_err = getattr(self.sam3, "load_error", None)
+                load_err = getattr(self.sam3, "error", None) or getattr(self.sam3, "load_error", None)
                 if load_err and not any(item.startswith("sam3_load_failed:") for item in last_reasons):
                     last_reasons.append(f"sam3_load_failed:{load_err}")
                 if mask is None:
@@ -1464,7 +1464,9 @@ class CascadeSegment:
     def _trace_sam3(self, image, role: str, query: str, mask, *, used: bool) -> None:
         px = 0 if mask is None else int((np.asarray(mask) > 0).sum())
         rec = {"role": role, "query": query, "px": px, "used": used}
-        err = getattr(self.sam3, "load_error", None) if self.sam3 is not None else None
+        err = None
+        if self.sam3 is not None:
+            err = getattr(self.sam3, "error", None) or getattr(self.sam3, "load_error", None)
         if err:
             rec["error"] = err
         self.sam3_attempts.append(rec)

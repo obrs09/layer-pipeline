@@ -56,7 +56,9 @@ def run_pipeline(
     inpaint_name: str | None = None,
     job_id: str | None = None,
     dry_run: bool = False,
+    backends: dict | None = None,
 ) -> Path:
+    """One input → one pack. Pass the same `backends` dict across inputs to load models once."""
     input_path = Path(input_path)
     out_root = Path(out_root)
     taxonomy = taxonomy or load_taxonomy()
@@ -78,8 +80,20 @@ def run_pipeline(
 
     seg_name = segment_name or (cfg.get("segment") or {}).get("name", "auto")
     inp_name = inpaint_name or (cfg.get("inpaint") or {}).get("name", "identity")
-    segment = build_segment(seg_name, cfg, ingested.kind, dry_run)
-    inpaint = build_inpaint(inp_name, cfg, dry_run)
+    seg_key = ("segment", seg_name, ingested.kind, dry_run)
+    inp_key = ("inpaint", inp_name, dry_run)
+    if backends is not None and seg_key in backends:
+        segment = backends[seg_key]
+    else:
+        segment = build_segment(seg_name, cfg, ingested.kind, dry_run)
+        if backends is not None:
+            backends[seg_key] = segment
+    if backends is not None and inp_key in backends:
+        inpaint = backends[inp_key]
+    else:
+        inpaint = build_inpaint(inp_name, cfg, dry_run)
+        if backends is not None:
+            backends[inp_key] = inpaint
     if hasattr(segment, "bind_dump"):
         segment.bind_dump(dump)
     log.write("backends", segment=segment.name, inpaint=inpaint.name)

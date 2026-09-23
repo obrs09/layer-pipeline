@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -40,23 +41,33 @@ def tint_overlay(
 ) -> np.ndarray:
     out = to_rgba(image)[:, :, :3].astype(np.float32) * base_dim
     for mask, color in items:
-        m = (mask > 0).astype(np.float32)[..., None]
-        if float(m.sum()) == 0:
+        on = mask > 0
+        ys, xs = np.where(on)
+        if xs.size == 0:
             continue
+        # Outside the mask the blend is out*1 + color*0, which is exact; only touch the bbox.
+        y0, y1 = int(ys.min()), int(ys.max()) + 1
+        x0, x1 = int(xs.min()), int(xs.max()) + 1
+        m = on[y0:y1, x0:x1].astype(np.float32)[..., None]
         arr = np.array(color, dtype=np.float32)
-        out = out * (1.0 - tint * m) + arr * (tint * m)
+        window = out[y0:y1, x0:x1]
+        out[y0:y1, x0:x1] = window * (1.0 - tint * m) + arr * (tint * m)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
 def role_color(role: str) -> tuple[int, int, int]:
     if role in ROLE_COLORS:
         return ROLE_COLORS[role]
-    h = abs(hash(role)) % 180
+    # str hash is salted per process; crc32 keeps overlay tints stable across runs.
+    h = zlib.crc32(role.encode("utf-8")) % 180
     return (40 + h, 80, 220 - h // 2)
 
 
 class StepDump:
     """Numbered per-stage previews. Does not change the PNG pack contract."""
+
+    # Debug dumps are written ~200 times per image; fast zlib keeps pixels identical.
+    COMPRESS_LEVEL = 1
 
     def __init__(self, out_dir: Path, enabled: bool = True) -> None:
         self.enabled = enabled
@@ -72,7 +83,7 @@ class StepDump:
     def write_png(self, rel: str, array: np.ndarray) -> None:
         if not self.enabled:
             return
-        save_png(self.root / rel, array)
+        save_png(self.root / rel, array, compress_level=self.COMPRESS_LEVEL)
 
     def write_json(self, rel: str, payload: object) -> None:
         if not self.enabled:
